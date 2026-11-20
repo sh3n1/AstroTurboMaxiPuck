@@ -1,0 +1,22 @@
+# Default settings for the Waveshare ESP32-S3-Touch-AMOLED-1.75.
+# ESP-IDF reads this file when it first creates `sdkconfig` (which is not committed).
+# After changing it, delete `sdkconfig` or run `idf.py fullclean` to apply.
+
+# Chip
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# 16 MB flash, with a larger app partition than the default 1 MB
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+
+# 8 MB octal PSRAM (ESP32-S3R8)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# Logs over the board's USB-C port (the ESP32-S3's built-in USB Serial/JTAG)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# 1 ms tick, smoother timing for drawing later
+CONFIG_FREERTOS_HZ=1000
