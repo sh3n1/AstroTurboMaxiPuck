@@ -34,9 +34,9 @@ app's "Two phones" mode.
 
 ## Open decisions (ask the user before building)
 
-1. **Where the firmware lives:** this folder as its own git repository, or a `firmware/` folder
-   in the app's repository. The app's `AGENTS.md` says PWA only, so either needs the user's
-   go-ahead and a note there.
+1. **Where the firmware lives:** decided, this folder as its own git repository (initialised
+   2026-11-20, branches `main` and `develop`, no remote yet). The app's `AGENTS.md` notes it as
+   the exception to its PWA-only rule. The link is drafted in the app's `docs/puck.md`.
 2. **Toolchain:** ESP-IDF (Apache-2.0) chosen, the project is set up in this folder. LVGL (MIT)
    proposed for drawing, still to be approved as a dependency. Not the Arduino core, which is
    LGPL.
