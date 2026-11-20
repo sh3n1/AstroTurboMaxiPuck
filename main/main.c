@@ -4,8 +4,8 @@
 // AstroTurboMaxiPuck firmware entry point.
 //
 // For now a bring-up check of the board: it logs the chip, flash and PSRAM, then tests the
-// screen (red, green and blue, then the app's sky colour with its three reticle rings) and
-// logs every touch.
+// screen (red, green and blue, then the app's sky colour with its three reticle rings), logs
+// every touch, and joins the Wi-Fi, showing the puck's address on screen.
 
 #include <inttypes.h>
 
@@ -18,12 +18,17 @@
 #include "esp_psram.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "wifi.h"
 
 static const char *TAG = "puck";
 
 // The app's colours (src/app/core/theme.ts and sky-map/sky-style.ts in the app).
 #define COLOR_SKY 0x05070F
 #define COLOR_RETICLE 0xE5484D
+#define COLOR_TEXT 0xE8EBF5
+
+// The Wi-Fi status line, near the bottom of the screen.
+static lv_obj_t *status_label;
 
 // The app's reticle: three plain rings, 0.5°, 2° and 4° in radius. For this test the
 // puck's diameter shows 10° of sky; later the phone sends the real field of view.
@@ -91,6 +96,31 @@ static void draw_test_screen(void)
         draw_ring(screen, (int)(RETICLE_RADII_DEG[i] * px_per_deg));
     }
     lv_obj_add_event_cb(screen, on_touch, LV_EVENT_PRESSED, NULL);
+
+    // Big text: the puck is read at arm's length in the dark.
+    status_label = lv_label_create(screen);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(status_label, lv_color_hex(COLOR_TEXT), 0);
+    lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -60);
+    lv_label_set_text(status_label, "");
+    lvgl_port_unlock();
+}
+
+// Shows the Wi-Fi state on screen.
+static void on_wifi_change(wifi_state_t state, const char *ip)
+{
+    lvgl_port_lock(0);
+    switch (state) {
+    case WIFI_NOT_SET:
+        lv_label_set_text(status_label, "No Wi-Fi set");
+        break;
+    case WIFI_CONNECTING:
+        lv_label_set_text(status_label, "Joining Wi-Fi...");
+        break;
+    case WIFI_CONNECTED:
+        lv_label_set_text(status_label, ip);
+        break;
+    }
     lvgl_port_unlock();
 }
 
@@ -116,4 +146,8 @@ void app_main(void)
     }
     draw_test_screen();
     ESP_LOGI(TAG, "Test screen drawn: touch it to log the position");
+
+    if (wifi_start(on_wifi_change) != ESP_OK) {
+        on_wifi_change(WIFI_NOT_SET, "");
+    }
 }

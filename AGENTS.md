@@ -23,7 +23,8 @@ app's "Two phones" mode.
   the three reticle rings, and logs touches. Colours and touch direction confirmed right. The
   touch chip is a CST9217 (Waveshare's wiki wrongly says FT3168 in one place). The board shows
   up as COM3 (the ESP32-S3's own USB). Build steps are in `README.md`, libraries and their
-  licences in `docs/third-party.md`. Next: the battery (AXP2101).
+  licences in `docs/third-party.md`. The battery (AXP2101) waits until the user has one.
+  Next: joining the Wi-Fi, then a first WebRTC link to the phone.
 
 ## Decisions taken
 
@@ -46,7 +47,13 @@ app's "Two phones" mode.
    the Arduino core, which is LGPL. Not Waveshare's board package either: it pulls in a
    closed-source JPEG library that GPL-3.0 doesn't allow (see `docs/third-party.md`).
    LVGL draws on core 1.
-3. **The link to the phone:**
+3. **The link to the phone:** decided 2026-11-21: WebRTC with **libpeer** (MIT,
+   github.com/sepfy/libpeer), kept as our own modified copy in this repository so pairing
+   needs only the puck's QR code: fixed ICE credentials shown in the QR, the phone builds the
+   puck's answer itself, and a secret from the QR in the first message replaces the DTLS
+   fingerprint check. Not Espressif's `esp_peer` (closed library, Espressif-only licence). The
+   puck **joins the user's Wi-Fi** (station mode), not its own access point; the Wi-Fi name
+   and password go in `sdkconfig` (menuconfig), never in git. Options as first discussed:
    - **WebRTC over Wi-Fi**, as the app's Two phones mode does (see below). Works with iPhones
      too. Needs a shared network: the ESP32's own access point, or the phone's hotspot. The ESP32
      has no camera, so pairing is one-way: the puck shows a QR code with its IP address, ICE
@@ -65,7 +72,8 @@ app's "Two phones" mode.
    Espressif's), ESP-SR, XPowersLib for the AXP2101 (MIT, keep its attribution text). Waveshare's
    example code is Apache-2.0. Also to look into before Wi-Fi: ESP-IDF's Wi-Fi driver ships as
    closed binary libraries, as for every ESP32 firmware; how GPL-3.0 projects on the ESP32
-   handle that.
+   handle that. Decided 2026-11-21: no statement or linking exception, as other GPL-3.0
+   ESP32 projects (Tasmota, Meshtastic) do.
 
 Suggested first step: bring-up of the screen, the touch and the battery; then a first link to
 the phone; only then the map.

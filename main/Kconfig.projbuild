@@ -1,0 +1,19 @@
+# Settings for the puck, shown in `idf.py menuconfig` (or the VS Code extension's
+# "SDK Configuration Editor") under "AstroTurboMaxiPuck".
+# They are saved in sdkconfig, which is not committed, so the Wi-Fi password stays out of git.
+
+menu "AstroTurboMaxiPuck"
+
+    config PUCK_WIFI_SSID
+        string "Wi-Fi name (SSID)"
+        default ""
+        help
+            The Wi-Fi network the puck joins. The phone must be on the same network.
+
+    config PUCK_WIFI_PASSWORD
+        string "Wi-Fi password"
+        default ""
+        help
+            The Wi-Fi network's password. Leave empty for an open network.
+
+endmenu
