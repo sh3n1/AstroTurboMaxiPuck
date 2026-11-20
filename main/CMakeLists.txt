@@ -2,7 +2,7 @@
 # Copyright The AstroTurboMaxiSolver authors
 
 idf_component_register(
-    SRCS "main.c"
+    SRCS "main.c" "board.c"
     INCLUDE_DIRS "."
-    PRIV_REQUIRES esp_psram spi_flash
+    PRIV_REQUIRES esp_psram spi_flash esp_driver_spi esp_driver_i2c esp_lcd
 )

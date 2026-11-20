@@ -17,10 +17,13 @@ app's "Two phones" mode.
   https://github.com/sh3n1/AstroTurboMaxiSolver. This folder sits inside it, ignored by its
   git, and `.claude/settings.json` gives agents read access to it. Its own `AGENTS.md` has the
   app's rules; the ones that apply here are repeated below.
-- **Current state:** an empty ESP-IDF project (2026-11-20): `main/main.c` only logs the chip,
-  flash and PSRAM as a bring-up check. Built with ESP-IDF v6.1.1 and run on the board: it
-  reports 16 MB flash and 8 MB PSRAM, as expected. The board shows up as COM3 (the ESP32-S3's
-  own USB). Build steps are in `README.md`.
+- **Current state (2026-11-21):** bring-up of the screen and touch done, tested on the board
+  with ESP-IDF v6.1.1. `main/board.c` starts the screen, touch and LVGL; `main/main.c` logs
+  the chip (16 MB flash, 8 MB PSRAM), shows red, green, blue, then the app's sky colour with
+  the three reticle rings, and logs touches. Colours and touch direction confirmed right. The
+  touch chip is a CST9217 (Waveshare's wiki wrongly says FT3168 in one place). The board shows
+  up as COM3 (the ESP32-S3's own USB). Build steps are in `README.md`, libraries and their
+  licences in `docs/third-party.md`. Next: the battery (AXP2101).
 
 ## Decisions taken
 
@@ -39,9 +42,10 @@ app's "Two phones" mode.
 1. **Where the firmware lives:** decided, this folder as its own git repository (initialised
    2026-11-20, branches `main` and `develop`, no remote yet). The app's `AGENTS.md` notes it as
    the exception to its PWA-only rule. The link is drafted in the app's `docs/puck.md`.
-2. **Toolchain:** ESP-IDF (Apache-2.0) chosen, the project is set up in this folder. LVGL (MIT)
-   proposed for drawing, still to be approved as a dependency. Not the Arduino core, which is
-   LGPL.
+2. **Toolchain:** decided, ESP-IDF (Apache-2.0) with LVGL 9 (MIT) through `esp_lvgl_port`. Not
+   the Arduino core, which is LGPL. Not Waveshare's board package either: it pulls in a
+   closed-source JPEG library that GPL-3.0 doesn't allow (see `docs/third-party.md`).
+   LVGL draws on core 1.
 3. **The link to the phone:**
    - **WebRTC over Wi-Fi**, as the app's Two phones mode does (see below). Works with iPhones
      too. Needs a shared network: the ESP32's own access point, or the phone's hotspot. The ESP32
@@ -58,7 +62,10 @@ app's "Two phones" mode.
      about 10 Hz, plus the rotation at 30 Hz, and the puck turns the last frame with the newest
      rotation in between ("timewarp"). The earlier lean, if a WebRTC trial works.
 5. **Licences to check** before using them: the WebRTC library on the ESP32 (libpeer, or
-   Espressif's), Waveshare's example code, ESP-SR.
+   Espressif's), ESP-SR, XPowersLib for the AXP2101 (MIT, keep its attribution text). Waveshare's
+   example code is Apache-2.0. Also to look into before Wi-Fi: ESP-IDF's Wi-Fi driver ships as
+   closed binary libraries, as for every ESP32 firmware; how GPL-3.0 projects on the ESP32
+   handle that.
 
 Suggested first step: bring-up of the screen, the touch and the battery; then a first link to
 the phone; only then the map.
