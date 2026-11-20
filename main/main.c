@@ -41,6 +41,10 @@ static void log_board_info(void)
 
 void app_main(void)
 {
+    // After a reset the board's USB port takes about a second to reconnect to the computer,
+    // and anything logged before that is lost. Wait, so the monitor sees the board info.
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
     ESP_LOGI(TAG, "AstroTurboMaxiPuck starting");
     log_board_info();
 

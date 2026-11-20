@@ -4,6 +4,7 @@ sdkconfig
 sdkconfig.old
 managed_components/
 
-# Editor and OS files
+# Editor and OS files (.vscode holds this computer's ESP-IDF path)
+.vscode/
 .DS_Store
 Thumbs.db

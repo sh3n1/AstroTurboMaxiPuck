@@ -18,7 +18,9 @@ app's "Two phones" mode.
   git, and `.claude/settings.json` gives agents read access to it. Its own `AGENTS.md` has the
   app's rules; the ones that apply here are repeated below.
 - **Current state:** an empty ESP-IDF project (2026-11-20): `main/main.c` only logs the chip,
-  flash and PSRAM as a bring-up check. Build steps are in `README.md`.
+  flash and PSRAM as a bring-up check. Built with ESP-IDF v6.1.1 and run on the board: it
+  reports 16 MB flash and 8 MB PSRAM, as expected. The board shows up as COM3 (the ESP32-S3's
+  own USB). Build steps are in `README.md`.
 
 ## Decisions taken
 

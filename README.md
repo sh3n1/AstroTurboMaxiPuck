@@ -25,6 +25,10 @@ Replace `COMx` with the board's port (Device Manager, "Ports"). Leave the monito
 `Ctrl+]`. If the board isn't detected, hold BOOT, press and release PWR (reset), then release
 BOOT.
 
+On Windows 11, if the build fails with "An Application Control policy has blocked this file",
+Smart App Control is blocking one of ESP-IDF's unsigned tools. Turn it off in Windows Security →
+App & browser control → Smart App Control settings.
+
 ## Licence
 
 GNU GPL version 3 only (`GPL-3.0-only`). Copyright The AstroTurboMaxiSolver authors.
