@@ -64,6 +64,14 @@ static lv_obj_t *next_label;
 // The QR code's size: it fits well inside the round screen, with big enough squares for a
 // phone camera at arm's length.
 #define QR_SIZE_PX 280
+// While the QR code shows, the screen's brightness beats slowly between these, so a phone
+// camera dazzled by the bright white AMOLED gets a darker moment in every beat to read it.
+#define QR_BEAT_PERIOD_MS 3000
+#define QR_BEAT_DIM 50     // of 255
+#define QR_BEAT_BRIGHT 255
+#define QR_BEAT_STEP_MS 50
+// The screen's brightness otherwise (Settings, Brightness, will set it: task 21).
+#define NORMAL_BRIGHTNESS 255
 
 // The app's reticle: three plain rings, 0.5°, 2° and 4° in radius. Until the app sends its
 // field of view, the puck's diameter shows 10° of sky.
@@ -240,6 +248,24 @@ static void refresh_view(lv_timer_t *timer)
     if (v->fov_deg > 0 && v->fov_deg < 360) size_rings(v->fov_deg);
 }
 
+// The QR code's slow heartbeat. An LVGL timer, so it runs in the LVGL task, which also
+// sends the screen its pixels: the brightness command never crosses a frame being sent.
+static void beat_qr(lv_timer_t *timer)
+{
+    static int shown = NORMAL_BRIGHTNESS;
+    int level = NORMAL_BRIGHTNESS;
+    if (!lv_obj_is_hidden(pairing_qr)) {
+        // A smooth swell from dim to bright and back, once a period.
+        float phase = (float)(lv_tick_get() % QR_BEAT_PERIOD_MS) / QR_BEAT_PERIOD_MS;
+        float swell = 0.5f - 0.5f * cosf(2 * (float)M_PI * phase);
+        level = QR_BEAT_DIM + (int)((QR_BEAT_BRIGHT - QR_BEAT_DIM) * swell);
+    }
+    if (level != shown) {
+        board_set_brightness((uint8_t)level);
+        shown = level;
+    }
+}
+
 static void draw_test_screen(void)
 {
     lvgl_port_lock(0);
@@ -278,6 +304,7 @@ static void draw_test_screen(void)
     lv_qrcode_set_quiet_zone(pairing_qr, true);
     lv_obj_center(pairing_qr);
     lv_obj_set_hidden(pairing_qr, true);
+    lv_timer_create(beat_qr, QR_BEAT_STEP_MS, NULL);
     lvgl_port_unlock();
 }
 
