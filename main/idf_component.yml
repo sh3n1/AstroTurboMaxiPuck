@@ -1,0 +1,17 @@
+# Libraries from the ESP Component Registry, downloaded into managed_components/ at build time.
+# Every one must be GPL-3.0 compatible: check the licence before adding one (see AGENTS.md).
+#
+# Not Waveshare's board package (waveshare/esp32_s3_touch_amoled_1_75): it pulls in
+# espressif/esp_new_jpeg, a closed-source library licensed for Espressif chips only, which
+# GPL-3.0 doesn't allow. main/board.c does the same setup with just the drivers below.
+dependencies:
+  idf:
+    version: ">=6.1"
+  # CO5300 AMOLED driver over QSPI (Apache-2.0)
+  espressif/esp_lcd_co5300: "^2.2.0"
+  # CST9217 touch driver (Apache-2.0)
+  waveshare/esp_lcd_touch_cst9217: "^2.0.0"
+  # Glue between ESP-IDF's LCD drivers and LVGL (Apache-2.0)
+  espressif/esp_lvgl_port: "^2.9.0"
+  # LVGL, the drawing library (MIT)
+  lvgl/lvgl: "^9.6.0"

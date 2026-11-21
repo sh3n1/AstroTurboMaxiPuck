@@ -17,8 +17,18 @@ app's "Two phones" mode.
   https://github.com/sh3n1/AstroTurboMaxiSolver. This folder sits inside it, ignored by its
   git, and `.claude/settings.json` gives agents read access to it. Its own `AGENTS.md` has the
   app's rules; the ones that apply here are repeated below.
-- **Current state:** an empty ESP-IDF project (2026-11-20): `main/main.c` only logs the chip,
-  flash and PSRAM as a bring-up check. Build steps are in `README.md`.
+- **Current state (2026-11-21):** bring-up of the screen and touch done, tested on the board
+  with ESP-IDF v6.1.1. `main/board.c` starts the screen, touch and LVGL; `main/main.c` logs
+  the chip (16 MB flash, 8 MB PSRAM), shows red, green, blue, then the app's sky colour with
+  the three reticle rings, and logs touches. Colours and touch direction confirmed right. The
+  touch chip is a CST9217 (Waveshare's wiki wrongly says FT3168 in one place). The board shows
+  up as COM3 (the ESP32-S3's own USB). Build steps are in `README.md`, libraries and their
+  licences in `docs/third-party.md`. The battery (AXP2101) waits until the user has one.
+  The puck joins the Wi-Fi (`main/wifi.c`) and a first WebRTC link works (`main/link_test.c`):
+  the puck serves a test page, the phone's browser POSTs its offer, libpeer answers, and the
+  data channel echoes 10 messages a second with none lost (round trip median 37 ms, worst
+  444 ms with a weak −91 dBm signal, 2026-11-21). Next: the one-QR-code pairing, so the app
+  itself (HTTPS, which can't POST to the puck's http address) can link to the puck.
 
 ## Decisions taken
 
@@ -31,35 +41,49 @@ app's "Two phones" mode.
 - The phone must keep running while the puck is used: the app's screen wake lock is needed.
 - **Screen layout and menu:** see [docs/screen-layout.md](docs/screen-layout.md). The map
   mirrors the phone's view with no panning on the puck.
+- **Linking to a phone:** see [docs/linking.md](docs/linking.md): the position always comes
+  from the phone on the telescope, straight from it in normal mode, or through the screen
+  phone in Two phones; never linked to the finder; changes go both ways.
 
 ## Open decisions (ask the user before building)
 
-1. **Where the firmware lives:** this folder as its own git repository, or a `firmware/` folder
-   in the app's repository. The app's `AGENTS.md` says PWA only, so either needs the user's
-   go-ahead and a note there.
-2. **Toolchain:** ESP-IDF (Apache-2.0) chosen, the project is set up in this folder. LVGL (MIT)
-   proposed for drawing, still to be approved as a dependency. Not the Arduino core, which is
-   LGPL.
-3. **The link to the phone:**
+1. **Where the firmware lives:** decided, this folder as its own git repository (initialised
+   2026-11-20, branches `main` and `develop`, no remote yet). The app's `AGENTS.md` notes it as
+   the exception to its PWA-only rule. The link is drafted in the app's `docs/puck.md`.
+2. **Toolchain:** decided, ESP-IDF (Apache-2.0) with LVGL 9 (MIT) through `esp_lvgl_port`. Not
+   the Arduino core, which is LGPL. Not Waveshare's board package either: it pulls in a
+   closed-source JPEG library that GPL-3.0 doesn't allow (see `docs/third-party.md`).
+   LVGL draws on core 1.
+3. **The link to the phone:** decided 2026-11-21: WebRTC with **libpeer** (MIT,
+   github.com/sepfy/libpeer), kept as our own modified copy in this repository so pairing
+   needs only the puck's QR code: fixed ICE credentials shown in the QR, the phone builds the
+   puck's answer itself, and a secret from the QR in the first message replaces the DTLS
+   fingerprint check. Not Espressif's `esp_peer` (closed library, Espressif-only licence). The
+   puck **joins the user's Wi-Fi** (station mode), not its own access point; the Wi-Fi name
+   and password go in `sdkconfig` (menuconfig), never in git. Options as first discussed:
    - **WebRTC over Wi-Fi**, as the app's Two phones mode does (see below). Works with iPhones
      too. Needs a shared network: the ESP32's own access point, or the phone's hotspot. The ESP32
      has no camera, so pairing is one-way: the puck shows a QR code with its IP address, ICE
      credentials and DTLS fingerprint, and the phone builds the session from it. No certificate
      problem: WebRTC's DTLS uses self-signed certificates, checked by fingerprint.
    - **Bluetooth (Web Bluetooth):** simpler, but Android only, and only about 10 to 30 KB/s.
-4. **How the map is drawn**, discussed so far:
-   - (A) The phone sends JPEG frames: simplest, but choppy.
-   - (B) The catalogue is sent once (about 200 KB of main stars, deep-sky objects and lines;
-     under 1 MB with the deep stars), then a 3×3 rotation, J2000 to view, at 20 to 30 Hz; the
-     puck projects and draws.
-   - (C) The phone sends the projected starfield (about 4 bytes a star, 3 to 5 KB a frame) at
-     about 10 Hz, plus the rotation at 30 Hz, and the puck turns the last frame with the newest
-     rotation in between ("timewarp"). The earlier lean, if a WebRTC trial works.
+4. **How the map is drawn:** decided 2026-11-21, option (B): the phone sends the catalogue
+   once (about 200 KB of main stars, deep-sky objects and lines; under 1 MB with the deep
+   stars), kept in the puck's flash with a version, then the rotation, J2000 to view, at
+   about 30 Hz; the puck projects and draws, mirroring the app's `sky-style.ts`. The phone
+   still does the astronomy (the rotation holds sidereal time, precession and the
+   alignment) and sends the moving objects (Moon, planets) as a small list. Chosen because
+   the S3 projects 10,000 stars in about 2 ms, and a late or lost 44-byte `view` costs
+   nothing on a weak Wi-Fi. Not chosen: (A) JPEG frames, choppy and heavy; (C) projected
+   stars at 10 Hz with "timewarp" in between, which smears on fast slews.
 5. **Licences to check** before using them: the WebRTC library on the ESP32 (libpeer, or
-   Espressif's), Waveshare's example code, ESP-SR.
+   Espressif's), ESP-SR, XPowersLib for the AXP2101 (MIT, keep its attribution text). Waveshare's
+   example code is Apache-2.0. Also to look into before Wi-Fi: ESP-IDF's Wi-Fi driver ships as
+   closed binary libraries, as for every ESP32 firmware; how GPL-3.0 projects on the ESP32
+   handle that. Decided 2026-11-21: no statement or linking exception, as other GPL-3.0
+   ESP32 projects (Tasmota, Meshtastic) do.
 
-Suggested first step: bring-up of the screen, the touch and the battery; then a first link to
-the phone; only then the map.
+The tasks still to do, in order of what depends on what, are in `TODO.md`.
 
 ## The app's side
 
@@ -67,7 +91,9 @@ the phone; only then the map.
   (`AF1:` prefix, deflate-raw and base64url, no STUN or TURN, same Wi-Fi or a hotspot), and the
   messages over one JSON data channel. The finder sends `pose` (where the telescope points),
   `hello`, `site`, `solveLog`; the screen sends `target`, `night`, `solveNow`, `alignment`.
-  The puck would take the screen's part.
+  The position always comes from the phone on the telescope: the puck links straight to it in
+  normal mode, or to the screen phone in Two phones, never to the finder; the phone it links to
+  stays as it is. See [docs/linking.md](docs/linking.md).
 - **Code:** `src/app/core/remote/` (`remote-link.ts` for codes and messages,
   `remote.service.ts`, `pose-glide.ts` for smoothing the pose between messages).
 - **Sky map drawing,** to match the look: `src/app/core/sky-map/` (`draw-sky.ts`,

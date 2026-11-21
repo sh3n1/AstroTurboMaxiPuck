@@ -21,6 +21,7 @@ How the puck's round 466×466 screen is laid out, and what each part does.
 ## Menu
 
 - Sensors
+- Zoom (the phone's map zooms with it; the puck still can't pan the map)
 - Eyepiece
 - Lists
 - Alignment
