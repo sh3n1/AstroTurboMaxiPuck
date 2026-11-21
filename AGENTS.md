@@ -41,6 +41,9 @@ app's "Two phones" mode.
 - The phone must keep running while the puck is used: the app's screen wake lock is needed.
 - **Screen layout and menu:** see [docs/screen-layout.md](docs/screen-layout.md). The map
   mirrors the phone's view with no panning on the puck.
+- **Linking to a phone:** see [docs/linking.md](docs/linking.md): the position always comes
+  from the phone on the telescope, straight from it in normal mode, or through the screen
+  phone in Two phones; never linked to the finder; changes go both ways.
 
 ## Open decisions (ask the user before building)
 
@@ -87,7 +90,9 @@ The tasks still to do, in order of what depends on what, are in `TODO.md`.
   (`AF1:` prefix, deflate-raw and base64url, no STUN or TURN, same Wi-Fi or a hotspot), and the
   messages over one JSON data channel. The finder sends `pose` (where the telescope points),
   `hello`, `site`, `solveLog`; the screen sends `target`, `night`, `solveNow`, `alignment`.
-  The puck would take the screen's part.
+  The position always comes from the phone on the telescope: the puck links straight to it in
+  normal mode, or to the screen phone in Two phones, never to the finder; the phone it links to
+  stays as it is. See [docs/linking.md](docs/linking.md).
 - **Code:** `src/app/core/remote/` (`remote-link.ts` for codes and messages,
   `remote.service.ts`, `pose-glide.ts` for smoothing the pose between messages).
 - **Sky map drawing,** to match the look: `src/app/core/sky-map/` (`draw-sky.ts`,
