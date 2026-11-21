@@ -233,7 +233,7 @@ static void refresh_view(lv_timer_t *timer)
         return;
     }
     const puck_view_msg_t *v = &state.view;
-    sky_draw_frame(v, state.night);
+    sky_draw_frame(v, state.night, state.eyepiece_field_deg);
     char text[96];
     snprintf(text, sizeof(text), "Alt %.1f°  Az %.1f°", v->alt_deg, v->az_deg);
     lv_label_set_text(pose_label, text);

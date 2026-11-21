@@ -140,9 +140,11 @@ static void on_control(const char *text)
     // What the puck shows besides the map: {"t":"state","night":false,"solving":false,...}
     else if (strstr(text, "\"t\":\"state\"")) {
         bool night = false, solving = false;
+        float eyepiece_field = 0;
         json_bool(text, "night", &night);
         json_bool(text, "solving", &solving);
-        view_state_set_app_state(night, solving);
+        json_float(text, "eyepieceFieldDeg", &eyepiece_field);
+        view_state_set_app_state(night, solving, eyepiece_field);
         ESP_LOGI(TAG, "State: night %d, solving %d", night, solving);
     }
     // The words to show, in the app's language: {"t":"texts","compass":{...},"credits":".."}

@@ -26,6 +26,8 @@ static const char *TAG = "sky";
 #define COLOR_HORIZON_NIGHT 0x6FCF9F
 #define COLOR_CARDINAL 0x6FCF9F
 #define COLOR_OUTLINE 0x05070F
+// The selected target's crosshair: the green the rings turn on target (THEME.success).
+#define COLOR_ON_TARGET 0x6FCF9F
 
 // Sizes, as the app's (draw-targets.ts), in the puck's pixels: its pixels are smaller than a
 // phone's CSS pixels (see STAR_SCALE in sky_draw.c).
@@ -37,6 +39,12 @@ static const char *TAG = "sky";
 // Labels: as many as fit without overlapping, up to this many, which keeps the frame quick.
 #define MAX_LABELS 48
 #define LABEL_FONT (&lv_font_montserrat_20)
+// Size circles are dashed, as the app's ([3, 3] on a canvas): this long a dash and gap.
+#define DASH_PX (3 * PX_SCALE)
+#define MAX_DASHES 120
+// The crosshair (the app's drawTargetMarker): strokes from the gap out this far.
+#define CROSSHAIR_GAP_PX (6 * PX_SCALE)
+#define CROSSHAIR_LENGTH_PX (10 * PX_SCALE)
 
 // The catalogue's layout (docs/puck.md, "Format").
 #define SECTION_NAMES 3
@@ -187,6 +195,63 @@ static void draw_ring(lv_layer_t *layer, float x, float y, float radius, uint32_
     lv_draw_arc(layer, &arc);
 }
 
+// A dashed circle: as many short arcs as fit, up to MAX_DASHES.
+static void draw_dashed_ring(lv_layer_t *layer, float x, float y, float radius, uint32_t rgb, float alpha)
+{
+    int dashes = (int)(2 * (float)M_PI * radius / (2 * DASH_PX));
+    if (dashes < 4) {
+        draw_ring(layer, x, y, radius, rgb, alpha);
+        return;
+    }
+    if (dashes > MAX_DASHES) dashes = MAX_DASHES;
+    lv_draw_arc_dsc_t arc;
+    lv_draw_arc_dsc_init(&arc);
+    arc.center.x = (int32_t)x;
+    arc.center.y = (int32_t)y;
+    arc.radius = (uint16_t)radius;
+    arc.width = 1;
+    arc.color = lv_color_hex(rgb);
+    arc.opa = (lv_opa_t)(LV_OPA_COVER * alpha);
+    float step = 360.0f / dashes;
+    for (int i = 0; i < dashes; i++) {
+        arc.start_angle = i * step;
+        arc.end_angle = i * step + step / 2;
+        lv_draw_arc(layer, &arc);
+    }
+}
+
+// The selected target: four short rounded strokes round a gap, in the on-target green, with
+// a dark edge first so it stands out over stars and lines (the app's drawTargetMarker). Its
+// place comes from the view's distance and direction to the target, so it needs no position
+// of its own.
+static void draw_target(lv_layer_t *layer, const sky_frame_t *f, bool night)
+{
+    const puck_view_msg_t *v = f->view;
+    if (isnan(v->target_dist_deg) || isnan(v->target_dir_deg)) return;
+    float r = sky_radius_px(f, 2 * v->target_dist_deg);
+    float dir = v->target_dir_deg * SKY_DEG_TO_RAD; // clockwise from up, on the screen
+    float x = SKY_CENTRE_PX + r * sinf(dir), y = SKY_CENTRE_PX - r * cosf(dir);
+    if (x < -CROSSHAIR_LENGTH_PX || y < -CROSSHAIR_LENGTH_PX || x > SKY_SIZE_PX + CROSSHAIR_LENGTH_PX ||
+        y > SKY_SIZE_PX + CROSSHAIR_LENGTH_PX) {
+        return; // off the screen: the chevrons point to it (task 11)
+    }
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.round_start = line.round_end = 1;
+    static const int8_t arms[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    for (int pass = 0; pass < 2; pass++) {
+        line.color = lv_color_hex(pass == 0 ? COLOR_OUTLINE : sky_for_night(COLOR_ON_TARGET, night));
+        line.width = (int32_t)(pass == 0 ? 6 * PX_SCALE : 3 * PX_SCALE);
+        for (int i = 0; i < 4; i++) {
+            line.p1.x = x + arms[i][0] * CROSSHAIR_GAP_PX;
+            line.p1.y = y + arms[i][1] * CROSSHAIR_GAP_PX;
+            line.p2.x = x + arms[i][0] * (CROSSHAIR_GAP_PX + CROSSHAIR_LENGTH_PX);
+            line.p2.y = y + arms[i][1] * (CROSSHAIR_GAP_PX + CROSSHAIR_LENGTH_PX);
+            lv_draw_line(layer, &line);
+        }
+    }
+}
+
 // ---- The parts ----
 
 // The horizon's line, with the compass points written under it (the app's drawHorizon).
@@ -267,8 +332,8 @@ static void draw_catalog_objects(lv_layer_t *layer, const sky_frame_t *f, bool n
         float size_radius = shows_size && o->size_deg > 0 ? sky_radius_px(f, o->size_deg) : 0;
         float marker = size_radius;
         if (size_radius >= MIN_SIZE_CIRCLE_PX) {
-            draw_ring(layer, x, y, size_radius,
-                      sky_for_night(night ? COLOR_SIZE_CIRCLE_NIGHT : COLOR_SIZE_CIRCLE_DAY, night), alpha);
+            draw_dashed_ring(layer, x, y, size_radius,
+                             sky_for_night(night ? COLOR_SIZE_CIRCLE_NIGHT : COLOR_SIZE_CIRCLE_DAY, night), alpha);
         } else if (!star) {
             // Stars are already drawn as dots: only other objects need a small marker.
             draw_ring(layer, x, y, MARKER_RADIUS_PX, sky_for_night(color, night), alpha);
@@ -303,4 +368,5 @@ void sky_objects_draw(lv_layer_t *layer, const sky_frame_t *f, bool night,
     draw_catalog_objects(layer, f, night, true);
     draw_catalog_objects(layer, f, night, false);
     if (f->fade_below) draw_names(layer, f, night);
+    draw_target(layer, f, night);
 }

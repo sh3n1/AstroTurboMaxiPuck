@@ -27,6 +27,14 @@ static const char *TAG = "sky";
 // The app's colours (sky-style.ts).
 #define COLOR_LINE_DAY 0x2A4170
 #define COLOR_LINE_NIGHT 0x4F6FAE
+#define COLOR_GRID_DAY 0x141C2E
+#define COLOR_GRID_NIGHT 0x2A3550
+#define COLOR_EYEPIECE_EDGE 0x3A4158
+// The alt-az grid (the app's drawGrid): circles at these altitudes, lines this far apart.
+static const float GRID_ALTITUDES_DEG[] = {30, 60};
+#define GRID_AZIMUTH_STEP_DEG 45
+// The dark side of a phased disc, so the whole disc still shows faintly.
+#define DARK_SIDE_ALPHA 0.15f
 // The Moon in the text's near-white, not the planets' yellow.
 #define COLOR_MOON 0xE8EBF5
 // The Moon's kind number (docs/puck.md, "Kinds").
@@ -68,6 +76,7 @@ static char loaded_id[CATALOG_ID_CHARS + 1];
 // The Moon and planets this frame: their discs here, their labels in sky_objects.c.
 static moving_object_t moving[MOVING_MAX];
 static size_t moving_count;
+static float moving_sun[3]; // the Sun's J2000 vector, which lit sides face
 
 // ---- Pixels ----
 
@@ -109,6 +118,29 @@ static void draw_disc(float x, float y, float radius, uint32_t rgb, float alpha)
             float dx = px + 0.5f - x, dy = py + 0.5f - y;
             float cover = radius + 0.5f - sqrtf(dx * dx + dy * dy);
             if (cover > 0) blend(&pixels[py * SIZE_PX + px], rgb, alpha * fminf(cover, 1));
+        }
+    }
+}
+
+// A disc lit on one side, as the Moon or Venus: (sun_x, sun_y) is the screen direction
+// towards the Sun, and lit the lit fraction. The terminator is half an ellipse whose width
+// shrinks to nothing at half phase, as the app's phaseIcon.
+static void draw_phase(float x, float y, float radius, float sun_x, float sun_y, float lit, uint32_t rgb,
+                       float alpha)
+{
+    float k = fmaxf(0, fminf(1, lit));
+    int x0 = (int)floorf(x - radius - 1), x1 = (int)ceilf(x + radius + 1);
+    int y0 = (int)floorf(y - radius - 1), y1 = (int)ceilf(y + radius + 1);
+    for (int py = y0 < 0 ? 0 : y0; py <= y1 && py < SIZE_PX; py++) {
+        for (int px = x0 < 0 ? 0 : x0; px <= x1 && px < SIZE_PX; px++) {
+            float dx = px + 0.5f - x, dy = py + 0.5f - y;
+            float cover = radius + 0.5f - sqrtf(dx * dx + dy * dy);
+            if (cover <= 0) continue;
+            // Along the Sun's direction (u) and across it (v), in the disc's radii.
+            float u = (dx * sun_x + dy * sun_y) / radius, v = (dy * sun_x - dx * sun_y) / radius;
+            float half_chord = sqrtf(fmaxf(0, 1 - v * v));
+            bool lit_here = u > -(2 * k - 1) * half_chord;
+            blend(&pixels[py * SIZE_PX + px], rgb, alpha * fminf(cover, 1) * (lit_here ? 1 : DARK_SIDE_ALPHA));
         }
     }
 }
@@ -158,6 +190,66 @@ static void load_catalog(void)
 }
 
 // ---- Drawing ----
+
+// A curve through local directions at (alt, az) steps, as the app's drawCurve: a step that
+// jumps across the screen is the curve passing behind the view, and isn't drawn.
+static void draw_altaz_curve(lv_layer_t *layer, lv_draw_line_dsc_t *line, const sky_frame_t *f, float alt0,
+                             float az0, float alt_step, float az_step, int steps)
+{
+    float last_x = 0, last_y = 0;
+    bool last_ok = false;
+    for (int i = 0; i <= steps; i++) {
+        float alt = (alt0 + i * alt_step) * SKY_DEG_TO_RAD, az = (az0 + i * az_step) * SKY_DEG_TO_RAD;
+        float local[3] = {cosf(alt) * sinf(az), cosf(alt) * cosf(az), sinf(alt)};
+        float x, y;
+        bool ok = sky_project_local(f, local, &x, &y);
+        if (ok && last_ok && fabsf(x - last_x) + fabsf(y - last_y) < SIZE_PX) {
+            line->p1.x = last_x;
+            line->p1.y = last_y;
+            line->p2.x = x;
+            line->p2.y = y;
+            lv_draw_line(layer, line);
+        }
+        last_x = x;
+        last_y = y;
+        last_ok = ok;
+    }
+}
+
+// The alt-az grid, under everything else (the app's drawGrid).
+static void draw_grid(lv_layer_t *layer, const sky_frame_t *f, bool night)
+{
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = lv_color_hex(sky_for_night(night ? COLOR_GRID_NIGHT : COLOR_GRID_DAY, night));
+    line.width = 1;
+    for (size_t i = 0; i < sizeof(GRID_ALTITUDES_DEG) / sizeof(GRID_ALTITUDES_DEG[0]); i++) {
+        draw_altaz_curve(layer, &line, f, GRID_ALTITUDES_DEG[i], 0, 0, 3, 120);
+    }
+    for (int az = 0; az < 360; az += GRID_AZIMUTH_STEP_DEG) {
+        draw_altaz_curve(layer, &line, f, 0, (float)az, 5, 0, 18);
+    }
+}
+
+// Outside the eyepiece's circle goes black, with a thin edge (the app's drawEyepieceMask).
+static void draw_eyepiece_mask(const sky_frame_t *f, float field_deg, bool night)
+{
+    if (field_deg <= 0) return;
+    float radius = sky_radius_px(f, field_deg);
+    uint32_t edge = sky_for_night(COLOR_EYEPIECE_EDGE, night);
+    for (int py = 0; py < SIZE_PX; py++) {
+        float dy = py + 0.5f - SKY_CENTRE_PX;
+        for (int px = 0; px < SIZE_PX; px++) {
+            float dx = px + 0.5f - SKY_CENTRE_PX;
+            float d = sqrtf(dx * dx + dy * dy) - radius;
+            if (d > 1) {
+                pixels[py * SIZE_PX + px] = 0;
+            } else if (d > -1) {
+                blend(&pixels[py * SIZE_PX + px], edge, 1 - fabsf(d)); // the edge, a pixel wide
+            }
+        }
+    }
+}
 
 static void draw_lines(lv_layer_t *layer, const sky_frame_t *f, bool night)
 {
@@ -210,6 +302,7 @@ static void draw_stars(const sky_frame_t *f, bool night)
 // smaller than a bright star, in the app's colour for the solar system.
 static void draw_moving(const sky_frame_t *f, bool night)
 {
+    const float *sun = moving_sun;
     for (size_t i = 0; i < moving_count; i++) {
         const moving_object_t *o = &moving[i];
         if (o->show_below != 255 && f->view->fov_deg >= o->show_below) continue;
@@ -221,7 +314,25 @@ static void draw_moving(const sky_frame_t *f, bool night)
         float radius = fmaxf(min_px, sky_radius_px(f, o->size_arcmin / 60));
         if (x < -radius || y < -radius || x > SIZE_PX + radius || y > SIZE_PX + radius) continue;
         float alpha = below && f->fade_below ? SKY_BELOW_HORIZON_OPACITY : 1;
-        draw_disc(x, y, radius, sky_for_night(moon ? COLOR_MOON : SKY_COLOR_SOLAR_SYSTEM, night), alpha);
+        uint32_t color = sky_for_night(moon ? COLOR_MOON : SKY_COLOR_SOLAR_SYSTEM, night);
+        if (isnan(o->phase)) {
+            draw_disc(x, y, radius, color, alpha);
+            continue;
+        }
+        // The lit side faces the Sun: the screen direction of a tiny step from the object
+        // towards the Sun, as the app's directionOnScreen.
+        float along = sun[0] * o->v[0] + sun[1] * o->v[1] + sun[2] * o->v[2];
+        float step[3];
+        for (int k = 0; k < 3; k++) step[k] = o->v[k] + 0.001f * (sun[k] - along * o->v[k]);
+        float sx, sy;
+        bool step_below;
+        float dir_x = 1, dir_y = 0;
+        if (sky_project(f, step, &sx, &sy, &step_below) && (sx != x || sy != y)) {
+            float length = sqrtf((sx - x) * (sx - x) + (sy - y) * (sy - y));
+            dir_x = (sx - x) / length;
+            dir_y = (sy - y) / length;
+        }
+        draw_phase(x, y, radius, dir_x, dir_y, o->phase, color, alpha);
     }
 }
 
@@ -250,7 +361,7 @@ void sky_draw_clear(bool night)
     lv_obj_invalidate(canvas);
 }
 
-void sky_draw_frame(const puck_view_msg_t *view, bool night)
+void sky_draw_frame(const puck_view_msg_t *view, bool night, float eyepiece_field_deg)
 {
     if (!canvas) return;
     load_catalog();
@@ -258,17 +369,18 @@ void sky_draw_frame(const puck_view_msg_t *view, bool night)
     fill(sky_for_night(SKY_COLOR_SKY, night));
     if (view->fov_deg > 0 && view->fov_deg < 360) {
         sky_frame_t f = sky_frame(view);
-        float sun[3];
-        moving_count = moving_get(moving, sun);
+        moving_count = moving_get(moving, moving_sun);
         lv_layer_t layer;
-        // The eyepiece view shows no constellation lines, as the app's.
+        // The eyepiece view shows no grid and no constellation lines, as the app's.
         if (f.fade_below) {
             lv_canvas_init_layer(canvas, &layer);
+            draw_grid(&layer, &f, night);
             draw_lines(&layer, &f, night);
             lv_canvas_finish_layer(canvas, &layer);
         }
         draw_stars(&f, night);
         draw_moving(&f, night);
+        if (!f.fade_below) draw_eyepiece_mask(&f, eyepiece_field_deg, night);
         lv_canvas_init_layer(canvas, &layer);
         sky_objects_draw(&layer, &f, night, moving, moving_count);
         lv_canvas_finish_layer(canvas, &layer);
