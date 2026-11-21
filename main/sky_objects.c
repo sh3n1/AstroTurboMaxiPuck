@@ -9,6 +9,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "texts.h"
 
 static const char *TAG = "sky";
 
@@ -214,16 +215,16 @@ static void draw_horizon(lv_layer_t *layer, const sky_frame_t *f, bool night)
         last_y = y;
         last_ok = ok;
     }
-    static const struct {
-        const char *label;
-        int az;
-    } cardinals[] = {{"N", 0}, {"E", 90}, {"S", 180}, {"W", 270}};
-    for (size_t i = 0; i < 4; i++) {
-        float local[3] = {sinf(cardinals[i].az * SKY_DEG_TO_RAD), cosf(cardinals[i].az * SKY_DEG_TO_RAD), 0};
+    // The letters in the app's language (texts.c). Kept until the layer is drawn: LVGL
+    // reads a label's text only then.
+    static char letters[4][TEXTS_COMPASS_BYTES];
+    for (int i = 0; i < 4; i++) {
+        texts_compass((texts_compass_t)i, letters[i]);
+        float az = i * 90 * SKY_DEG_TO_RAD; // north, east, south, west
+        float local[3] = {sinf(az), cosf(az), 0};
         float x, y;
         if (sky_project_local(f, local, &x, &y)) {
-            draw_label(layer, cardinals[i].label, x, y + 22 * PX_SCALE, sky_for_night(COLOR_CARDINAL, night), 1,
-                       true);
+            draw_label(layer, letters[i], x, y + 22 * PX_SCALE, sky_for_night(COLOR_CARDINAL, night), 1, true);
         }
     }
 }

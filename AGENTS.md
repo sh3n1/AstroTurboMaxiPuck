@@ -35,7 +35,13 @@ app's "Two phones" mode.
 
 ## Decisions taken
 
-- The puck shows the **full sky map**, not just guidance arrows.
+- The puck shows the **full sky map**, not just guidance arrows: **the same items as the
+  phone's map**, wherever the puck can technically draw them (2026-11-21). What's missing
+  is listed in `TODO.md`, task 18b.
+- **Every translated word comes from the phone** (2026-11-21), in the app's `texts` message:
+  the firmware holds no translations. Names and designations are never translated. Only
+  what shows before any link (joining the Wi-Fi, the QR code) is in the firmware, in
+  English.
 - **No browser simulator** of the puck: work on the real device.
 - **Astronomy stays on the phone.** The app already works out where everything is
   (`src/app/core/astronomy/astronomy.ts`, with astronomy-engine). The puck draws what the phone
