@@ -49,7 +49,9 @@ app's "Two phones" mode.
   drawing (core 1).
 - The phone must keep running while the puck is used: the app's screen wake lock is needed.
 - **Screen layout and menu:** see [docs/screen-layout.md](docs/screen-layout.md). The map
-  mirrors the phone's view with no panning on the puck.
+  follows where the phone points, with no panning on the puck, but **zooms on its own**
+  (2026-11-21): the menu's Zoom shows +, −, ✓ and ✗ over the map, and nothing is sent to
+  the phone. In the phone's eyepiece view the puck follows the eyepiece's field.
 - **Linking to a phone:** see [docs/linking.md](docs/linking.md): the position always comes
   from the phone on the telescope, straight from it in normal mode, or through the screen
   phone in Two phones; never linked to the finder; changes go both ways.
