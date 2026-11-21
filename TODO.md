@@ -98,9 +98,18 @@ night, no grey.
     (`main/moving.c`, with the JSON readers now in `main/json_read.c`) and draws each as a
     disc of its size over the stars. Still to do: the Moon's and Venus's phase, turned to the
     Sun, and the labels (task 18). Depends on 16.
-18. **The rest of the map**: deep-sky objects and their icons, planets, the horizon, the
-    grid, labels and constellation names, from the catalogue (already sent) or the moving
-    list. The constellation lines are drawn already (task 16). Depends on 17.
+18. **The rest of the map.** *Mostly written 2026-11-21, to test on the board.*
+    `main/sky_objects.c` draws a top layer as the app's map does: the horizon and compass
+    points, a small ring for deep-sky objects or their size circle (the Messier and bright
+    ones), labels beside objects, planets and the Moon (the catalogue's labels and label
+    rules; up to 48 labels, none overlapping, those above the horizon first), and the
+    constellation names last. The shared maths and colours are in `main/sky_common.h`;
+    labels use LVGL's Montserrat 20 (turned on in `sdkconfig.defaults`). Things to check on
+    the board: that labels keep the frame quick (each is drawn five times, for its dark
+    outline), and their size. Still to do: the app's own icons for galaxies, nebulae and
+    planets (`target-icons.ts`), dashed size circles, the alt-az grid, the Moon's and
+    Venus's phase, and Greek letters in labels (the font lacks them; see task 9).
+    Depends on 17.
 
 ## 4. The menu
 
