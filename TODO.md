@@ -19,13 +19,13 @@ task only depends on tasks above it. "App" marks work in the app's repository
 
 ## 1. The link
 
-3. **Write the contract in the app's `docs/puck.md`** (App): the QR format (`AFP1:`, its 82
-   bytes), the `auth` message, the channels, the binary `view` message, the catalogue
-   transfer, and the moving objects. Map option B, decided 2026-11-21: the phone sends the
-   catalogue once (kept in the puck's flash with a version, sent again only when it
-   changes), then the `view` rotation at about 30 Hz; the puck projects and draws. The Moon,
-   planets and comets move, so the phone sends their positions as a small list now and then.
-   First check that the catalogue data's licences allow copying it to the puck.
+3. **Write the contract in the app's `docs/puck.md`** (App). *Written 2026-11-21, to
+   review.* Map option B: the QR format (`AFP1:`, 82 bytes), `auth`, three channels (control,
+   `view`, catalogue), the 68-byte `view` (two quaternions: J2000 to local, local to view),
+   how the puck projects (refraction, stereographic, as the app), the catalogue format and
+   transfer (kept in flash by its SHA-256 `id`), and `objects` for what moves. The data
+   licences allow it: the catalogue reaches the puck only over the link, never in the
+   firmware, and carries the app's credits.
 4. **Ask: the phone's screen while linked to the puck.** Today the phone goes into finder
    mode (no buttons), as for two phones. The puck mirrors the phone's map, so the phone may
    need its normal map, or a simpler one.
