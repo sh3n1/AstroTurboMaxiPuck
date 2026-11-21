@@ -5,9 +5,12 @@
 //
 // For now a bring-up check of the board: it logs the chip, flash and PSRAM, then tests the
 // screen (red, green and blue, then the app's sky colour with its three reticle rings), logs
-// every touch, and joins the Wi-Fi, showing the puck's address on screen.
+// every touch, and joins the Wi-Fi, showing the puck's address on screen. Then it shows a QR
+// code for the app to pair with, and once linked, where the telescope points (Alt, Az).
 
 #include <inttypes.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "board.h"
 #include "esp_chip_info.h"
@@ -18,7 +21,7 @@
 #include "esp_psram.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "link_test.h"
+#include "link.h"
 #include "wifi.h"
 
 static const char *TAG = "puck";
@@ -31,6 +34,14 @@ static const char *TAG = "puck";
 // The Wi-Fi and link status lines, near the bottom of the screen.
 static lv_obj_t *status_label;
 static lv_obj_t *link_label;
+// The pairing QR code, in the middle, shown until the app links.
+static lv_obj_t *pairing_qr;
+// Where the telescope points, near the top, once linked.
+static lv_obj_t *pose_label;
+
+// The QR code's size: it fits well inside the round screen, with big enough squares for a
+// phone camera at arm's length.
+#define QR_SIZE_PX 280
 
 // The app's reticle: three plain rings, 0.5°, 2° and 4° in radius. For this test the
 // puck's diameter shows 10° of sky; later the phone sends the real field of view.
@@ -111,25 +122,61 @@ static void draw_test_screen(void)
     }
     lv_obj_add_event_cb(screen, on_touch, LV_EVENT_PRESSED, NULL);
 
-    status_label = make_status_label(screen, -60);
-    link_label = make_status_label(screen, -100);
+    status_label = make_status_label(screen, -40);
+    link_label = make_status_label(screen, -75);
+    pose_label = make_status_label(screen, 0);
+    lv_obj_align(pose_label, LV_ALIGN_TOP_MID, 0, 50);
+
+    // Dark squares on white, as cameras read best, with the quiet zone around it.
+    pairing_qr = lv_qrcode_create(screen);
+    lv_qrcode_set_size(pairing_qr, QR_SIZE_PX);
+    lv_qrcode_set_dark_color(pairing_qr, lv_color_black());
+    lv_qrcode_set_light_color(pairing_qr, lv_color_white());
+    lv_qrcode_set_quiet_zone(pairing_qr, true);
+    lv_obj_center(pairing_qr);
+    lv_obj_set_hidden(pairing_qr, true);
     lvgl_port_unlock();
 }
 
-// Shows the link test's state on screen.
-static void on_link_state(const char *text)
+// The link's callbacks (link.h), run in the link task.
+static void show_pairing(const char *qr_text)
+{
+    lvgl_port_lock(0);
+    lv_qrcode_update(pairing_qr, qr_text, strlen(qr_text));
+    lv_obj_set_hidden(pairing_qr, false);
+    lv_label_set_text(link_label, "Scan in the app");
+    lv_label_set_text(pose_label, "");
+    lvgl_port_unlock();
+}
+
+static void show_link_state(const char *text)
 {
     lvgl_port_lock(0);
     lv_label_set_text(link_label, text);
+    if (strcmp(text, "Linked") == 0) lv_obj_set_hidden(pairing_qr, true);
     lvgl_port_unlock();
 }
 
-// Shows the Wi-Fi state on screen, and starts the link test the first time it connects.
+static void show_pose(float alt_deg, float az_deg)
+{
+    char text[48];
+    snprintf(text, sizeof(text), "Alt %.1f°  Az %.1f°", alt_deg, az_deg);
+    lvgl_port_lock(0);
+    lv_label_set_text(pose_label, text);
+    lvgl_port_unlock();
+}
+
+// Shows the Wi-Fi state on screen, and starts the link the first time it connects.
 static void on_wifi_change(wifi_state_t state, const char *ip)
 {
     static bool link_started = false;
     if (state == WIFI_CONNECTED && !link_started) {
-        link_started = link_test_start(on_link_state) == ESP_OK;
+        static const link_callbacks_t callbacks = {
+            .show_pairing = show_pairing,
+            .show_state = show_link_state,
+            .show_pose = show_pose,
+        };
+        link_started = link_start(&callbacks) == ESP_OK;
     }
 
     lvgl_port_lock(0);

@@ -696,7 +696,11 @@ int dtls_srtp_handshake(DtlsSrtp* dtls_srtp, Address* addr, const char* remote_f
   }
 
   const mbedtls_x509_crt* remote_crt;
-  if ((remote_crt = mbedtls_ssl_get_peer_cert(&dtls_srtp->ssl)) != NULL) {
+  if (remote_fingerprint == NULL || remote_fingerprint[0] == '\0') {
+    // AstroTurboMaxiPuck: lite pairing has no fingerprint for the other side; the
+    // application authenticates it instead (see peer_connection_start_lite).
+    LOGI("no fingerprint to check: lite pairing");
+  } else if ((remote_crt = mbedtls_ssl_get_peer_cert(&dtls_srtp->ssl)) != NULL) {
     dtls_srtp_x509_digest(remote_crt, dtls_srtp->actual_remote_fingerprint);
 
     if (strncmp(remote_fingerprint, dtls_srtp->actual_remote_fingerprint,

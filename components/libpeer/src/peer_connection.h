@@ -123,6 +123,28 @@ const char* peer_connection_create_offer(PeerConnection* pc);
 const char* peer_connection_create_answer(PeerConnection* pc);
 
 /**
+ * AstroTurboMaxiPuck: what the other side needs to connect to us in lite pairing.
+ */
+typedef struct PeerLiteInfo {
+  char ufrag[8];          // our ICE username fragment
+  char pwd[32];           // our ICE password
+  char fingerprint[160];  // our DTLS certificate's SHA-256, as "AB:CD:..."
+  char ip[48];            // our address on the network
+  uint16_t port;          // our UDP port
+} PeerLiteInfo;
+
+/**
+ * AstroTurboMaxiPuck: lite pairing, for a side that can't receive the other's description,
+ * such as a device that shows a QR code but can't read one. Makes our ICE credentials and
+ * DTLS certificate, opens our UDP port and returns them in info, for the other side to build
+ * our answer from. We act as an ICE-lite, controlled agent and the DTLS server: the other
+ * side's first valid binding request (checked with our password) gives its address. The
+ * other side's certificate is NOT checked against a fingerprint; the application must
+ * authenticate it, for example with a secret it sends first. Returns 0, or -1 on failure.
+ */
+int peer_connection_start_lite(PeerConnection* pc, PeerLiteInfo* info);
+
+/**
  * @brief register callback function to handle packet loss from RTCP receiver report
  * @param[in] peer connection
  * @param[in] callback function void (*cb)(float fraction_loss, uint32_t total_loss, void *userdata)

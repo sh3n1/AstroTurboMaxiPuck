@@ -362,12 +362,51 @@ int agent_send_binding_request(Agent* agent) {
   return ret;
 }
 
+// AstroTurboMaxiPuck: lite pairing (see Agent.lite). Takes the other side from its first
+// valid binding request: its ICE username from USERNAME ("ours:theirs") and its address from
+// where the request came from, as the one selected pair.
+static void agent_accept_lite_peer(Agent* agent, StunMessage* stun_msg, Address* addr) {
+  const char* colon = strchr(stun_msg->username, ':');
+  if (!colon || agent->local_candidates_count == 0) {
+    return;
+  }
+  memset(agent->remote_ufrag, 0, sizeof(agent->remote_ufrag));
+  strncpy(agent->remote_ufrag, colon + 1, sizeof(agent->remote_ufrag) - 1);
+
+  ice_candidate_create(&agent->remote_candidates[0], 1, ICE_CANDIDATE_TYPE_PRFLX, addr);
+  agent->remote_candidates_count = 1;
+
+  IceCandidatePair* pair = &agent->candidate_pairs[0];
+  pair->local = &agent->local_candidates[0];
+  pair->remote = &agent->remote_candidates[0];
+  pair->priority = pair->local->priority + pair->remote->priority;
+  pair->state = ICE_CANDIDATE_STATE_SUCCEEDED;
+  agent->candidate_pairs_num = 1;
+  agent->nominated_pair = pair;
+  agent->selected_pair = pair;
+
+  char addr_string[ADDRSTRLEN];
+  addr_to_string(addr, addr_string, sizeof(addr_string));
+  LOGI("lite pairing: peer %s:%d, ufrag %s", addr_string, addr->port, agent->remote_ufrag);
+}
+
 void agent_process_stun_request(Agent* agent, StunMessage* stun_msg, Address* addr) {
   StunMessage msg;
   StunHeader* header;
   switch (stun_msg->stunmethod) {
     case STUN_METHOD_BINDING:
+      // AstroTurboMaxiPuck: while lite pairing waits, log every check, to see why one fails.
+      if (agent->lite && !agent->selected_pair) {
+        char from[ADDRSTRLEN];
+        addr_to_string(addr, from, sizeof(from));
+        LOGI("lite pairing: check from %s:%d, user %s, %d bytes, %s", from, addr->port,
+             stun_msg->username, (int)stun_msg->size,
+             stun_msg_is_valid(stun_msg->buf, stun_msg->size, agent->local_upwd) == 0 ? "valid" : "INVALID");
+      }
       if (stun_msg_is_valid(stun_msg->buf, stun_msg->size, agent->local_upwd) == 0) {
+        if (agent->lite && !agent->selected_pair) {
+          agent_accept_lite_peer(agent, stun_msg, addr);
+        }
         header = (StunHeader*)stun_msg->buf;
         memcpy(agent->transaction_id, header->transaction_id, sizeof(header->transaction_id));
         agent_create_binding_response(agent, &msg, addr);

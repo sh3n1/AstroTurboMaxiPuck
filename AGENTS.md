@@ -79,8 +79,7 @@ app's "Two phones" mode.
    handle that. Decided 2026-11-21: no statement or linking exception, as other GPL-3.0
    ESP32 projects (Tasmota, Meshtastic) do.
 
-Suggested first step: bring-up of the screen, the touch and the battery; then a first link to
-the phone; only then the map.
+The tasks still to do, in order of what depends on what, are in `TODO.md`.
 
 ## The app's side
 

@@ -21,6 +21,12 @@ Every change is marked with an `AstroTurboMaxiPuck:` comment.
   about a second later: about one message a second got through. Now every DATA chunk is
   read, the last TSN received in order is tracked (from the INIT or INIT ACK), duplicates are
   skipped, one SACK goes out per packet, and the messages are passed on after it.
+- **Lite pairing**, for the puck's one-QR-code pairing: `peer_connection_start_lite()` in
+  `peer_connection.c` and `.h` makes our ICE credentials and certificate and returns them
+  with our address, for the other side to build our answer from. `Agent.lite` in `agent.c`
+  and `.h`: the other side's first valid binding request gives its address and ICE username,
+  and becomes the selected pair; we never send checks. `dtls_srtp.c`: with no remote
+  fingerprint, the certificate isn't checked (the application checks a secret instead).
 - `dtls_srtp.c`: the mbedTLS entropy and CTR-DRBG set-up and free calls only on mbedTLS 3
   and older. mbedTLS 4 (ESP-IDF 6.x) has no entropy API, and libpeer's mbedTLS 4 path
   doesn't use them.

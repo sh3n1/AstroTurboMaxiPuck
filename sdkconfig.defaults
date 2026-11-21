@@ -24,6 +24,8 @@ CONFIG_FREERTOS_HZ=1000
 
 # Big text for reading at arm's length
 CONFIG_LV_FONT_MONTSERRAT_28=y
+# QR codes, for pairing with the app (Nayuki's QR generator, MIT, inside LVGL)
+CONFIG_LV_USE_QRCODE=y
 # Don't compile LVGL's own examples and demos: hundreds of files the puck never uses.
 # CONFIG_LV_BUILD_EXAMPLES is not set
 # CONFIG_LV_BUILD_DEMOS is not set

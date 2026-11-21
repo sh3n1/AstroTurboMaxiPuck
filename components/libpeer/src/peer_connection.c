@@ -302,6 +302,9 @@ int peer_connection_loop(PeerConnection* pc) {
         // if ice candidate pass the connectivity check, then we can start DTLS-SRTP handshake
         dtls_srtp_handshake(&pc->dtls_srtp, NULL,
                             pc->remote_fingerprint);
+      } else if (pc->agent.lite) {
+        // AstroTurboMaxiPuck: lite pairing only answers the other side's checks.
+        agent_recv(&pc->agent, pc->agent_buf, sizeof(pc->agent_buf));
       } else {
         agent_connectivity_check(&pc->agent);
       }
@@ -551,6 +554,30 @@ const char* peer_connection_create_offer(PeerConnection* pc) {
 const char* peer_connection_create_answer(PeerConnection* pc) {
   peer_connection_set_local_description(pc, NULL, SDP_TYPE_ANSWER);
   return peer_connection_create_sdp(pc, SDP_TYPE_ANSWER);
+}
+
+// AstroTurboMaxiPuck: lite pairing, see peer_connection.h.
+int peer_connection_start_lite(PeerConnection* pc, PeerLiteInfo* info) {
+  // As for an offer: DTLS server, fresh ICE credentials, the host address gathered.
+  peer_connection_set_local_description(pc, NULL, SDP_TYPE_OFFER);
+  if (pc->state == PEER_CONNECTION_FAILED || pc->agent.local_candidates_count == 0) {
+    return -1;
+  }
+  // But controlled, and only answering checks: we don't know the other side yet.
+  pc->agent.mode = AGENT_MODE_CONTROLLED;
+  pc->agent.lite = 1;
+  memset(pc->remote_fingerprint, 0, sizeof(pc->remote_fingerprint));
+
+  memset(info, 0, sizeof(*info));
+  strncpy(info->ufrag, pc->agent.local_ufrag, sizeof(info->ufrag) - 1);
+  strncpy(info->pwd, pc->agent.local_upwd, sizeof(info->pwd) - 1);
+  strncpy(info->fingerprint, pc->dtls_srtp.local_fingerprint, sizeof(info->fingerprint) - 1);
+  Address* host = &pc->agent.local_candidates[0].addr;
+  addr_to_string(host, info->ip, sizeof(info->ip));
+  info->port = host->port;
+
+  STATE_CHANGED(pc, PEER_CONNECTION_CHECKING);
+  return 0;
 }
 
 int peer_connection_send_rtcp_pil(PeerConnection* pc, uint32_t ssrc) {

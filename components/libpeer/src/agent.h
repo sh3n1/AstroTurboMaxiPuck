@@ -63,6 +63,11 @@ struct Agent {
   int candidate_pairs_num;
   int use_candidate;
   uint32_t transaction_id[3];
+
+  // AstroTurboMaxiPuck: lite pairing. The other side's address and ICE credentials aren't
+  // known in advance: its first valid binding request (checked with our own password only)
+  // gives its address and username, and becomes the selected pair. We never send checks.
+  int lite;
 };
 
 void agent_gather_candidate(Agent* agent, const char* urls, const char* username, const char* credential);
