@@ -34,6 +34,9 @@ typedef struct SctpChunkParam {
 typedef enum SctpParamType {
 
   SCTP_PARAM_STATE_COOKIE = 7,
+  // AstroTurboMaxiPuck: announces partial reliability (RFC 3758), so the other side really
+  // drops messages on channels that never resend, and tells us with FORWARD-TSN.
+  SCTP_PARAM_FORWARD_TSN_SUPPORTED = 0xC000,
 
 } SctpParamType;
 
@@ -152,6 +155,16 @@ typedef struct {
   uint16_t next_sequence;
 } SctpOutgoingStream;
 
+// AstroTurboMaxiPuck: the DATA chunk's flags: U for a message on an unordered channel, and
+// B and E for the first and last piece of a message split over several packets.
+#define SCTP_DATA_FLAG_UNORDERED 0x04
+#define SCTP_DATA_FLAG_BEGIN 0x02
+#define SCTP_DATA_FLAG_END 0x01
+
+// AstroTurboMaxiPuck: the biggest message put back together from pieces. The puck's messages
+// stay under this (docs/puck.md in the app), and the app's answer says so (max-message-size).
+#define SCTP_MAX_MESSAGE_SIZE 16384
+
 // AstroTurboMaxiPuck: how many data channel messages one incoming packet may carry. A packet
 // is at most about 1200 bytes, so more than this would be tiny messages.
 #define SCTP_MAX_MESSAGES_PER_PACKET 32
@@ -164,9 +177,20 @@ typedef struct Sctp {
   int connected;
   uint32_t verification_tag;
   uint32_t tsn;
-  // AstroTurboMaxiPuck: the last DATA TSN received in order from the other side, for SACKs.
+  // AstroTurboMaxiPuck: the last DATA TSN received in order from the other side, for SACKs,
+  // and which of the next 32 TSNs have arrived early (bit i: remote_cum_tsn + 1 + i).
   uint32_t remote_cum_tsn;
+  uint32_t remote_tsn_mask;
   int remote_tsn_known;
+  // AstroTurboMaxiPuck: a message arriving in pieces. The pieces of one message have
+  // consecutive TSNs, so one buffer is enough: the next piece must have the next TSN.
+  uint8_t* reasm_buf;        // SCTP_MAX_MESSAGE_SIZE bytes, made with the association
+  size_t reasm_len;
+  uint32_t reasm_next_tsn;
+  uint16_t reasm_sid;
+  uint32_t reasm_ppid;
+  int reasm_active;          // a message's first piece came, and none is missing so far
+  int reasm_done;            // a message was completed in this packet, not yet passed on
   DtlsSrtp* dtls_srtp;
   int stream_count;
   SctpStreamEntry stream_table[SCTP_MAX_STREAMS];

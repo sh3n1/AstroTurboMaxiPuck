@@ -20,6 +20,9 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     CONFIG_MAX_NALU_SIZE=1024
     # An ECDSA certificate instead of RSA: much quicker to make, and every browser takes it.
     CONFIG_DTLS_USE_ECDSA=1
+    # Test hook (our addition in sctp.c): act as if every Nth incoming DATA chunk was lost.
+    # 0 is off; only for testing resends and FORWARD-TSN.
+    SCTP_TEST_DROP_EVERY=0
 )
 
 # libpeer has warnings (switches without every case, and similar) that ESP-IDF would turn

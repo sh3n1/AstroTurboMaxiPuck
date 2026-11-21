@@ -240,6 +240,67 @@ void sctp_handle_sctp_packet(Sctp* sctp, char* buf, size_t len) {
     sctp_parse_data_channel_open(sctp, sid, buf + 28, len - 28);
 }
 
+#if !CONFIG_USE_USRSCTP
+// AstroTurboMaxiPuck: moves the cumulative TSN over every TSN that has now arrived in a row.
+static void sctp_absorb_received_tsns(Sctp* sctp) {
+  while (sctp->remote_tsn_mask & 1) {
+    sctp->remote_cum_tsn++;
+    sctp->remote_tsn_mask >>= 1;
+  }
+}
+
+// AstroTurboMaxiPuck: adds one piece of a message that came in pieces. A first piece (B)
+// starts the message; any other must have the next TSN and the same stream, or a piece was
+// lost and the message is dropped. Returns 1 when this piece was the last (E) and the message
+// is complete in reasm_buf, with reasm_done set until it is passed on.
+static int sctp_add_piece(Sctp* sctp, SctpDataChunk* chunk, uint16_t len, uint32_t tsn) {
+  uint16_t sid = ntohs(chunk->sid);
+  if (chunk->iube & SCTP_DATA_FLAG_BEGIN) {
+    sctp->reasm_active = 1;
+    sctp->reasm_len = 0;
+    sctp->reasm_sid = sid;
+    sctp->reasm_ppid = ntohl(chunk->ppid);
+  } else if (!sctp->reasm_active || tsn != sctp->reasm_next_tsn || sid != sctp->reasm_sid) {
+    sctp->reasm_active = 0;  // a piece is missing: this message is lost
+    return 0;
+  }
+  if (!sctp->reasm_buf || sctp->reasm_len + len > SCTP_MAX_MESSAGE_SIZE) {
+    LOGW("message in pieces too big, dropped");
+    sctp->reasm_active = 0;
+    return 0;
+  }
+  memcpy(sctp->reasm_buf + sctp->reasm_len, chunk->data, len);
+  sctp->reasm_len += len;
+  sctp->reasm_next_tsn = tsn + 1;
+  if (!(chunk->iube & SCTP_DATA_FLAG_END)) {
+    return 0;
+  }
+  sctp->reasm_active = 0;
+  sctp->reasm_done = 1;
+  return 1;
+}
+
+// AstroTurboMaxiPuck: writes the SACK's gap blocks, the runs of TSNs that arrived after a gap,
+// as offsets from the cumulative TSN. Returns how many it wrote.
+static uint16_t sctp_write_gap_blocks(Sctp* sctp, uint8_t* blocks, size_t room) {
+  uint16_t count = 0;
+  uint32_t mask = sctp->remote_tsn_mask;
+  for (int i = 0; i < 32 && (count + 1) * 4 <= room;) {
+    if (!((mask >> i) & 1)) {
+      i++;
+      continue;
+    }
+    int start = i;
+    while (i < 32 && ((mask >> i) & 1)) i++;
+    uint16_t* block = (uint16_t*)(blocks + count * 4);
+    block[0] = htons(start + 1);  // bit i is remote_cum_tsn + 1 + i
+    block[1] = htons(i);          // the run's last TSN: (i - 1) + 1
+    count++;
+  }
+  return count;
+}
+#endif
+
 void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
   if (!sctp || !buf)
     return;
@@ -310,18 +371,60 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         uint32_t ppid = ntohl(data_chunk->ppid);
         uint16_t sid = ntohs(data_chunk->sid);
         uint32_t tsn = ntohl(data_chunk->tsn);
+#if SCTP_TEST_DROP_EVERY > 0
+        // AstroTurboMaxiPuck: test hook, set in CMakeLists.txt. Acts as if every Nth DATA
+        // chunk was lost on the way, to test resends and FORWARD-TSN.
+        static unsigned test_chunks;
+        if (++test_chunks % SCTP_TEST_DROP_EVERY == 0) {
+          LOGI("test: dropped TSN %u (%s)", (unsigned)tsn,
+               (data_chunk->iube & SCTP_DATA_FLAG_UNORDERED) ? "unordered" : "ordered");
+          break;
+        }
+#endif
         need_sack = 1;
 
         if (!sctp->remote_tsn_known) {
           sctp->remote_cum_tsn = tsn - 1;
+          sctp->remote_tsn_mask = 0;
           sctp->remote_tsn_known = 1;
         }
-        // Only the next TSN in order is taken. An older one is a resend already taken; a
-        // newer one leaves a gap, and the SACK makes the other side resend from the gap.
-        if ((int32_t)(tsn - sctp->remote_cum_tsn) != 1) {
+        // AstroTurboMaxiPuck: the next TSN in order is always taken. One after a gap is
+        // taken only for an unordered message (U flag), such as the app's poses, so a lost
+        // one doesn't hold the next back; it is reported in the SACK's gap blocks. An
+        // ordered one after a gap is left for the other side to resend once the gap is
+        // filled, which keeps its order. An older TSN, or one already taken, is a resend.
+        int32_t ahead = (int32_t)(tsn - sctp->remote_cum_tsn);
+        int unordered = (data_chunk->iube & SCTP_DATA_FLAG_UNORDERED) != 0;
+        if (ahead < 1 || ahead > 32 || (sctp->remote_tsn_mask >> (ahead - 1)) & 1) {
           break;
         }
-        sctp->remote_cum_tsn = tsn;
+        if (ahead > 1 && !unordered) {
+          break;
+        }
+        // AstroTurboMaxiPuck: a message in pieces (not both B and E). The pieces go into one
+        // buffer, passed on after this packet's SACK; a new message's first piece in the same
+        // packet as the end of another would overwrite it, so it isn't taken now: left
+        // unacknowledged, the other side resends it.
+        uint8_t piece_flags = data_chunk->iube & (SCTP_DATA_FLAG_BEGIN | SCTP_DATA_FLAG_END);
+        int whole = piece_flags == (SCTP_DATA_FLAG_BEGIN | SCTP_DATA_FLAG_END);
+        if (!whole && (piece_flags & SCTP_DATA_FLAG_BEGIN) && sctp->reasm_done) {
+          break;
+        }
+        sctp->remote_tsn_mask |= 1u << (ahead - 1);
+        sctp_absorb_received_tsns(sctp);
+
+        if (!whole) {
+          // Every piece of a message carries the message's PPID.
+          int is_message = ppid == DATA_CHANNEL_PPID_DOMSTRING || ppid == DATA_CHANNEL_PPID_BINARY;
+          if (sctp_add_piece(sctp, data_chunk, payload_len, tsn) && is_message &&
+              message_count < SCTP_MAX_MESSAGES_PER_PACKET) {
+            messages[message_count].data = (char*)sctp->reasm_buf;
+            messages[message_count].len = sctp->reasm_len;
+            messages[message_count].sid = sctp->reasm_sid;
+            message_count++;
+          }
+          break;
+        }
 
         if (ppid == DATA_CHANNEL_PPID_CONTROL && payload_len > 0 &&
             data_chunk->data[0] == DATA_CHANNEL_OPEN) {
@@ -345,12 +448,14 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         sctp->verification_tag = init_chunk->initiate_tag;
         // AstroTurboMaxiPuck: the other side's DATA starts at its initial TSN.
         sctp->remote_cum_tsn = ntohl(init_chunk->initial_tsn) - 1;
+        sctp->remote_tsn_mask = 0;
         sctp->remote_tsn_known = 1;
 
         SctpInitChunk* init_ack = (SctpInitChunk*)out_packet->chunks;
         init_ack->common.type = SCTP_INIT_ACK;
         init_ack->common.flags = 0x00;
-        init_ack->common.length = htons(20 + 8);
+        // AstroTurboMaxiPuck: + 4 for the Forward-TSN-Supported parameter after the cookie.
+        init_ack->common.length = htons(20 + 8 + 4);
         init_ack->initiate_tag = htonl(0x12345678);
         init_ack->a_rwnd = htonl(0x100000);
         init_ack->number_of_outbound_streams = 0xffff;
@@ -362,6 +467,10 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         param->type = htons(SCTP_PARAM_STATE_COOKIE);
         param->length = htons(8);
         *(uint32_t*)&param->value = htonl(0x02);
+        // AstroTurboMaxiPuck: we take FORWARD-TSN (partial reliability).
+        SctpChunkParam* forward_tsn = (SctpChunkParam*)((uint8_t*)param + 8);
+        forward_tsn->type = htons(SCTP_PARAM_FORWARD_TSN_SUPPORTED);
+        forward_tsn->length = htons(4);
         length = ntohs(init_ack->common.length) + sizeof(SctpHeader);
       } break;
       case SCTP_INIT_ACK: {
@@ -374,6 +483,7 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         sctp->verification_tag = init_ack->initiate_tag;
         // AstroTurboMaxiPuck: the other side's DATA starts at its initial TSN.
         sctp->remote_cum_tsn = ntohl(init_ack->initial_tsn) - 1;
+        sctp->remote_tsn_mask = 0;
         sctp->remote_tsn_known = 1;
         int type;
         // find cookie
@@ -431,6 +541,26 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         }
 #endif
         break;
+      case SCTP_FORWARD_TSN: {
+        // AstroTurboMaxiPuck: the other side gave up on messages up to this TSN (a channel
+        // that never resends), so we stop waiting for them. Our SCTP doesn't keep the
+        // order of ordered messages within a stream by sequence number, so the
+        // stream/sequence pairs that follow need nothing.
+        if (chunk_len < 8 || !sctp->remote_tsn_known) {
+          break;
+        }
+        SctpForwardTsnChunk* forward = (SctpForwardTsnChunk*)(buf + pos);
+        uint32_t new_cum = ntohl(forward->new_cumulative_tsn);
+        int32_t skip = (int32_t)(new_cum - sctp->remote_cum_tsn);
+        // Only on a lost message, so it's rare and worth seeing.
+        LOGI("FORWARD-TSN to %u, %d ahead", (unsigned)new_cum, (int)skip);
+        if (skip > 0) {
+          sctp->remote_tsn_mask = skip >= 32 ? 0 : sctp->remote_tsn_mask >> skip;
+          sctp->remote_cum_tsn = new_cum;
+          sctp_absorb_received_tsns(sctp);
+        }
+        need_sack = 1;
+      } break;
       case SCTP_HEARTBEAT: {
         SctpChunkCommon* heartbeat_ack = (SctpChunkCommon*)out_packet->chunks;
 
@@ -496,16 +626,18 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
   if (need_sack) {
     memset(sctp->buf, 0, sizeof(sctp->buf));
     SctpSackChunk* sack_chunk = (SctpSackChunk*)out_packet->chunks;
+    uint16_t gaps = sctp_write_gap_blocks(sctp, sack_chunk->blocks, 64);
     sack_chunk->common.type = SCTP_SACK;
     sack_chunk->common.flags = 0x00;
-    sack_chunk->common.length = htons(16);
+    sack_chunk->common.length = htons(16 + gaps * 4);
     sack_chunk->cumulative_tsn_ack = htonl(sctp->remote_cum_tsn);
     sack_chunk->a_rwnd = htonl((uint32_t)sizeof(sctp->buf));
+    sack_chunk->number_of_gap_ack_blocks = htons(gaps);
     length = ntohs(sack_chunk->common.length) + sizeof(SctpHeader);
 
     uint16_t ack_sequence;
     if (open_sid >= 0 && sctp_next_stream_sequence(sctp, open_sid, &ack_sequence) == 0) {
-      SctpDataChunk* ack_chunk = (SctpDataChunk*)sack_chunk->blocks;
+      SctpDataChunk* ack_chunk = (SctpDataChunk*)(sack_chunk->blocks + gaps * 4);
       ack_chunk->type = SCTP_DATA;
       ack_chunk->iube = 0x03;
       ack_chunk->tsn = htonl(sctp->tsn++);
@@ -531,6 +663,7 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
       sctp->onmessage(messages[i].data, messages[i].len, sctp->userdata, messages[i].sid);
     }
   }
+  sctp->reasm_done = 0;  // AstroTurboMaxiPuck: the buffer is free for the next message
 #endif
 }
 
@@ -629,6 +762,14 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
   sctp->remote_port = 5000;
   sctp->tsn = 1234;
   sctp->remote_tsn_known = 0;  // AstroTurboMaxiPuck: learnt from the INIT or INIT ACK
+  sctp->remote_tsn_mask = 0;
+#if !CONFIG_USE_USRSCTP
+  // AstroTurboMaxiPuck: the buffer for messages in pieces (in PSRAM on the puck, since it
+  // is big), freed in sctp_destroy_association.
+  if (!sctp->reasm_buf) sctp->reasm_buf = malloc(SCTP_MAX_MESSAGE_SIZE);
+  sctp->reasm_active = 0;
+  sctp->reasm_done = 0;
+#endif
   sctp->outgoing_stream_count = 0;
   memset(sctp->outgoing_streams, 0, sizeof(sctp->outgoing_streams));
 #if CONFIG_USE_USRSCTP
@@ -741,12 +882,16 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
   header->verification_tag = 0x0;
   init_chunk->common.type = SCTP_INIT;
   init_chunk->common.flags = 0x00;
-  init_chunk->common.length = htons(20);
+  // AstroTurboMaxiPuck: + 4 for the Forward-TSN-Supported parameter.
+  init_chunk->common.length = htons(20 + 4);
   init_chunk->initiate_tag = htonl(0x12345678);
   init_chunk->a_rwnd = htonl(0x100000);
   init_chunk->number_of_outbound_streams = 0xffff;
   init_chunk->number_of_inbound_streams = 0xffff;
   init_chunk->initial_tsn = htonl(sctp->tsn);
+  // AstroTurboMaxiPuck: we take FORWARD-TSN (partial reliability).
+  init_chunk->param[0].type = htons(SCTP_PARAM_FORWARD_TSN_SUPPORTED);
+  init_chunk->param[0].length = htons(4);
   length = ntohs(init_chunk->common.length) + sizeof(SctpHeader);
   length = (4 * ((length + 3) / 4));
   header->checksum = sctp_get_checksum(sctp, sctp->buf, length);
@@ -762,6 +907,12 @@ void sctp_destroy_association(Sctp* sctp) {
     usrsctp_shutdown(sctp->sock, SHUT_RDWR);
     usrsctp_close(sctp->sock);
     sctp->sock = NULL;
+  }
+#else
+  // AstroTurboMaxiPuck: the buffer for messages in pieces.
+  if (sctp) {
+    free(sctp->reasm_buf);
+    sctp->reasm_buf = NULL;
   }
 #endif
 }

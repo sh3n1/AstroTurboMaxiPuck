@@ -104,7 +104,11 @@ static bool json_number(const char *json, const char *key, float *value)
 static void on_message(char *message, size_t length, void *user_data, uint16_t stream_id)
 {
     char text[512];
-    if (length >= sizeof(text)) return; // not a message this test reads
+    if (length >= sizeof(text)) {
+        // Not a message this test reads; logged, to see messages put together from pieces.
+        ESP_LOGI(TAG, "Message of %u bytes on stream %u", (unsigned)length, stream_id);
+        return;
+    }
     memcpy(text, message, length);
     text[length] = '\0';
 
@@ -131,6 +135,9 @@ static void on_message(char *message, size_t length, void *user_data, uint16_t s
         if (pointing && json_number(pointing, "altDeg", &alt) && json_number(pointing, "azDeg", &az)) {
             ui.show_pose(alt, az);
         }
+        // How many poses arrive: about 20 a second while the phone moves, 1 when still.
+        static int poses;
+        if (++poses % 100 == 0) ESP_LOGI(TAG, "%d poses received", poses);
     }
 }
 

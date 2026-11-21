@@ -11,19 +11,21 @@ task only depends on tasks above it. "App" marks work in the app's repository
 - WebRTC with libpeer, our copy with fixes (`components/libpeer/README.md`).
 - One-QR-code pairing with the app (`main/link.c`; app: `puck-pairing.ts`, "Link to the
   puck" in Two phones). The puck shows the app's Alt and Az.
+- SCTP partial reliability in libpeer: Forward-TSN announced and handled, unordered messages
+  taken after a gap. Tested 2026-11-21 dropping every 20th message: poses kept arriving at
+  about 19 a second.
+- SCTP messages in pieces put back together, up to 16 KB (`max-message-size:16384` in the
+  app's answer). Tested 2026-11-21 with a 5 KB message.
 
 ## 1. The link
 
-1. **Handle SCTP FORWARD-TSN in libpeer.** The app's pose channel never resends a lost
-   message; the sender then sends FORWARD-TSN to skip it. Our SCTP ignores it, so after the
-   first lost pose it waits forever for the missing TSN, and since TSNs are shared by all
-   channels, the main channel stalls too. Needed before anything relies on the link.
-2. **Reassemble fragmented SCTP messages in libpeer.** Incoming messages bigger than one
-   packet (about 1200 bytes) are split; our SCTP can't put them back together. Needed for the
-   `stars` frames (3 to 5 KB).
 3. **Write the contract in the app's `docs/puck.md`** (App): the QR format (`AFP1:`, its 82
-   bytes), the `auth` message, the channels, and the binary `view` and `stars` messages.
-   **Ask:** confirm option C (projected stars at 10 Hz plus rotation at 30 Hz).
+   bytes), the `auth` message, the channels, the binary `view` message, the catalogue
+   transfer, and the moving objects. Map option B, decided 2026-11-21: the phone sends the
+   catalogue once (kept in the puck's flash with a version, sent again only when it
+   changes), then the `view` rotation at about 30 Hz; the puck projects and draws. The Moon,
+   planets and comets move, so the phone sends their positions as a small list now and then.
+   First check that the catalogue data's licences allow copying it to the puck.
 4. **Ask: the phone's screen while linked to the puck.** Today the phone goes into finder
    mode (no buttons), as for two phones. The puck mirrors the phone's map, so the phone may
    need its normal map, or a simpler one.
@@ -32,7 +34,7 @@ task only depends on tasks above it. "App" marks work in the app's repository
    unreliable channel, and `targetInfo` (the target's name) on every change. Depends on 3, 4.
 6. **Puck reads the view**: parse `view` and `targetInfo` in `main/link.c`, replacing the
    test's text search, and hand them to the screen through a small shared state, safe
-   between core 0 (link) and core 1 (drawing). Depends on 1, 3, 5.
+   between core 0 (link) and core 1 (drawing). Depends on 3, 5.
 7. **Puck sends commands** (App receives): `solveNow` (reticle tap), `step` (left and right
    arrows), `night`. The app handles `step` with its playlist (`playlist.service.ts`).
    Depends on 3, 6.
@@ -62,15 +64,19 @@ night, no grey.
 
 ## 3. The sky map
 
-15. **App sends the stars** (App): the stars the phone's map shows, projected for the puck,
-    as `stars` frames at about 10 Hz. **Ask:** how the phone's rectangular map fits the round
-    screen. Depends on 3, 5.
-16. **Puck draws the stars** as the background, behind the reticle, with the app's colours
-    and sizes by magnitude. Depends on 2, 9, 15.
-17. **Timewarp**: between frames, turn the last frame by the newest `view` rotation, so the
-    map moves smoothly at 30 Hz. Depends on 16.
+15. **App sends the catalogue** (App): the stars (and later deep-sky objects and lines) the
+    phone's map uses, in a compact binary form, with a version. The puck keeps it in flash
+    (its own partition) and asks for it only when its version differs. **Ask:** how deep
+    (main stars only, about 200 KB, or the deep stars too, under 1 MB), and how the phone's
+    rectangular map fits the round screen. Depends on 3, 5.
+16. **Puck projects and draws the stars** as the background, behind the reticle: rotate each
+    star by the newest `view`, project, and draw with the app's colours and sizes by
+    magnitude (mirroring `sky-style.ts`), only the stars bright enough for the field of view.
+    Depends on 9, 15.
+17. **Moving objects** (App and puck): the Moon, planets and comets as a small list of
+    J2000 positions, sent on link and every minute or so. Depends on 16.
 18. **The rest of the map**: constellation lines, deep-sky objects, planets, the horizon and
-    labels, each needing its own message type in `docs/puck.md`. Depends on 17.
+    labels, added to the catalogue or the moving list. Depends on 17.
 
 ## 4. The menu
 

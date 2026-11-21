@@ -21,6 +21,19 @@ Every change is marked with an `AstroTurboMaxiPuck:` comment.
   about a second later: about one message a second got through. Now every DATA chunk is
   read, the last TSN received in order is tracked (from the INIT or INIT ACK), duplicates are
   skipped, one SACK goes out per packet, and the messages are passed on after it.
+- `sctp.c`, `sctp.h`, **partial reliability** (RFC 3758): upstream didn't announce
+  Forward-TSN support, so browsers treated channels that never resend as reliable and resent
+  lost messages, holding back everything after them. Now INIT and INIT ACK carry the
+  Forward-TSN-Supported parameter, FORWARD-TSN moves the cumulative TSN on, and an
+  unordered message arriving after a gap is taken at once (a 32-TSN window, reported in the
+  SACK's gap blocks). An ordered one after a gap still waits for the resend, keeping its
+  order.
+- `sctp.c`, `sctp.h`, **messages in pieces**: upstream couldn't take a message bigger than
+  one packet. Now the pieces (B and E flags, consecutive TSNs) are put back together in one
+  buffer of `SCTP_MAX_MESSAGE_SIZE` (16 KB, allocated with the association); a message with
+  a missing piece is dropped.
+- `sctp.c` test hook `SCTP_TEST_DROP_EVERY` (set in `CMakeLists.txt`, 0 is off): acts as if
+  every Nth incoming DATA chunk was lost, to test resends and FORWARD-TSN.
 - **Lite pairing**, for the puck's one-QR-code pairing: `peer_connection_start_lite()` in
   `peer_connection.c` and `.h` makes our ICE credentials and certificate and returns them
   with our address, for the other side to build our answer from. `Agent.lite` in `agent.c`

@@ -67,14 +67,15 @@ app's "Two phones" mode.
      credentials and DTLS fingerprint, and the phone builds the session from it. No certificate
      problem: WebRTC's DTLS uses self-signed certificates, checked by fingerprint.
    - **Bluetooth (Web Bluetooth):** simpler, but Android only, and only about 10 to 30 KB/s.
-4. **How the map is drawn**, discussed so far:
-   - (A) The phone sends JPEG frames: simplest, but choppy.
-   - (B) The catalogue is sent once (about 200 KB of main stars, deep-sky objects and lines;
-     under 1 MB with the deep stars), then a 3×3 rotation, J2000 to view, at 20 to 30 Hz; the
-     puck projects and draws.
-   - (C) The phone sends the projected starfield (about 4 bytes a star, 3 to 5 KB a frame) at
-     about 10 Hz, plus the rotation at 30 Hz, and the puck turns the last frame with the newest
-     rotation in between ("timewarp"). The earlier lean, if a WebRTC trial works.
+4. **How the map is drawn:** decided 2026-11-21, option (B): the phone sends the catalogue
+   once (about 200 KB of main stars, deep-sky objects and lines; under 1 MB with the deep
+   stars), kept in the puck's flash with a version, then the rotation, J2000 to view, at
+   about 30 Hz; the puck projects and draws, mirroring the app's `sky-style.ts`. The phone
+   still does the astronomy (the rotation holds sidereal time, precession and the
+   alignment) and sends the moving objects (Moon, planets) as a small list. Chosen because
+   the S3 projects 10,000 stars in about 2 ms, and a late or lost 44-byte `view` costs
+   nothing on a weak Wi-Fi. Not chosen: (A) JPEG frames, choppy and heavy; (C) projected
+   stars at 10 Hz with "timewarp" in between, which smears on fast slews.
 5. **Licences to check** before using them: the WebRTC library on the ESP32 (libpeer, or
    Espressif's), ESP-SR, XPowersLib for the AXP2101 (MIT, keep its attribution text). Waveshare's
    example code is Apache-2.0. Also to look into before Wi-Fi: ESP-IDF's Wi-Fi driver ships as
