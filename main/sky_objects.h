@@ -21,8 +21,9 @@ void sky_objects_load(const uint8_t *catalog, size_t bytes);
 
 /** A trail of three chevrons from (x, y) towards angle (radians, clockwise from up), that
  *  brightens outwards, spread apart the farther away the target is (the app's drawChevrons). */
-void sky_draw_chevrons(lv_layer_t *layer, float x, float y, float angle, float distance_deg, bool night);
+void sky_draw_chevrons(float x, float y, float angle, float distance_deg, bool night);
 
-/** Draws the top layer into a canvas layer. moving: the Moon and planets, for their labels. */
-void sky_objects_draw(lv_layer_t *layer, const sky_frame_t *f, bool night,
+/** Draws the top layer into the canvas's pixels, and places its labels, which
+ *  sky_labels_draw() draws after. moving: the Moon and planets, for their labels. */
+void sky_objects_draw(const sky_frame_t *f, bool night,
                       const moving_object_t *moving, size_t moving_count);

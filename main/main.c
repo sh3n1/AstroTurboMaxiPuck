@@ -24,10 +24,12 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_psram.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "link.h"
 #include "sky_draw.h"
+#include "view_glide.h"
 #include "view_state.h"
 #include "wifi.h"
 #include "zoom.h"
@@ -77,14 +79,16 @@ static lv_obj_t *next_label;
 // The screen's brightness otherwise (Settings, Brightness, will set it: task 21).
 #define NORMAL_BRIGHTNESS 255
 
-// The app's reticle: three plain rings, 0.5°, 2° and 4° across (the app's RETICLE_RINGS_DEG
-// are diameters). Until the app sends its field of view, the puck's diameter shows 10°.
+// The app's reticle: three plain rings, 0.5Â°, 2Â° and 4Â° across (the app's RETICLE_RINGS_DEG
+// are diameters). Until the app sends its field of view, the puck's diameter shows 10Â°.
 #define TEST_FOV_DEG 10.0f
 static const float RETICLE_DIAMETERS_DEG[] = {0.5f, 2.0f, 4.0f};
 #define RING_COUNT (sizeof(RETICLE_DIAMETERS_DEG) / sizeof(RETICLE_DIAMETERS_DEG[0]))
 static lv_obj_t *rings[RING_COUNT];
 // How often the screen looks at the shared view state.
 #define VIEW_REFRESH_MS 33
+// The longest step a glide takes in one frame, in ms of time elapsed.
+#define GLIDE_MAX_STEP_MS 100.0f
 #define DEG_TO_RAD 0.017453292f
 
 // Print the chip, flash and PSRAM details once at start-up.
@@ -227,7 +231,11 @@ static void refresh_view(lv_timer_t *timer)
         }
     }
     static uint32_t shown_zoom;
-    if (!night_changed && state.has_view == shown_view && state.view_count == shown_count &&
+    // The view on the screen, gliding towards the newest (view_glide.c), and while it moves.
+    static puck_view_msg_t glided;
+    static bool gliding;
+    static int64_t last_frame_us;
+    if (!gliding && !night_changed && state.has_view == shown_view && state.view_count == shown_count &&
         strcmp(state.target_name, shown_target) == 0 && zoom_revision() == shown_zoom) {
         return; // nothing new
     }
@@ -235,7 +243,7 @@ static void refresh_view(lv_timer_t *timer)
     shown_count = state.view_count;
     shown_zoom = zoom_revision();
     strcpy(shown_target, state.target_name);
-    // The arrows make way for the zoom's − and + while it shows.
+    // The arrows make way for the zoom's âˆ’ and + while it shows.
     lv_obj_set_hidden(previous_label, !state.has_view || zoom_active());
     lv_obj_set_hidden(next_label, !state.has_view || zoom_active());
 
@@ -245,22 +253,30 @@ static void refresh_view(lv_timer_t *timer)
         lv_label_set_text(target_label, "");
         size_rings(TEST_FOV_DEG, 0);
         sky_draw_clear(state.night);
+        glided.type = 0; // the next view is shown at once
+        gliding = false;
         return;
     }
     // The puck's own field, not the phone's, except in the phone's eyepiece view (zoom.c).
-    puck_view_msg_t shown = state.view;
-    zoom_apply(&shown);
-    const puck_view_msg_t *v = &shown;
+    puck_view_msg_t newest = state.view;
+    zoom_apply(&newest);
+    // The time since the last frame, but no more than a few frames' worth: after a still
+    // moment, a new view still glides in.
+    int64_t now = esp_timer_get_time();
+    float elapsed_ms = fminf((now - last_frame_us) / 1000.0f, GLIDE_MAX_STEP_MS);
+    last_frame_us = now;
+    gliding = view_glide_step(&glided, &newest, elapsed_ms);
+    const puck_view_msg_t *v = &glided;
     sky_draw_frame(v, state.night, state.eyepiece_field_deg);
     char text[96];
-    snprintf(text, sizeof(text), "Alt %.1f°  Az %.1f°", v->alt_deg, v->az_deg);
+    snprintf(text, sizeof(text), "Alt %.1fÂ°  Az %.1fÂ°", v->alt_deg, v->az_deg);
     lv_label_set_text(pose_label, text);
-    snprintf(text, sizeof(text), "FOV %.1f°", v->fov_deg);
+    snprintf(text, sizeof(text), "FOV %.1fÂ°", v->fov_deg);
     lv_label_set_text(fov_label, text);
     if (isnan(v->target_dist_deg)) {
         lv_label_set_text(target_label, state.target_name);
     } else {
-        snprintf(text, sizeof(text), "%s %.1f°", state.target_name, v->target_dist_deg);
+        snprintf(text, sizeof(text), "%s %.1fÂ°", state.target_name, v->target_dist_deg);
         lv_label_set_text(target_label, text);
     }
     // The app's ring view: one ring, the eyepiece's field (view flag bit 3).

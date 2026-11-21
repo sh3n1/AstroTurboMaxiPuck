@@ -166,12 +166,15 @@ which messages it needs.
 - **ICE credentials from the hardware random generator.** *Done 2026-11-21, to test on
   the board.* libpeer seeded them from the clock, which the puck doesn't have, so someone on
   the same Wi-Fi could guess them and keep taking the pairing slot. Now `esp_random`.
-- **Smoother map.** Drawing a frame takes 125 to 175 ms, mostly the labels (LVGL renders
-  their text again every frame), then the background fill and the lines; 33 ms is needed
-  for 30 frames a second. Draw labels once and reuse them, fewer at wide fields, a quicker
-  fill, and glide between views (as the app's `pose-glide.ts`) so the map turns smoothly
-  even below 30 frames a second. `main/sky_draw.c` logs each step's time.
-- **Split `main/sky_draw.c`** (525 lines, the rule is about 500): the stars into their own file.
+- **Smoother map.** *Done 2026-11-21, tested: "awesome".* From 125 to 175 ms a frame down
+  to 46 to 60 ms: labels rendered once and kept (`main/sky_labels.c`), everything drawn
+  straight into the pixels with no LVGL layers (`main/sky_pixels.c`), only the objects the
+  field shows looked at, `-O2`, and the view glides between messages (`main/view_glide.c`,
+  as the app's `pose-glide.ts`), the zoom too. `main/sky_draw.c` was split (stars into
+  `main/sky_stars.c`).
+- **Quicker still.** What a frame spends now: the grid and lines 7 to 27 ms, the fill
+  13 ms (the PSRAM's speed), the stars 9 ms, labels 5 to 8 ms. To try: fewer grid points,
+  a bigger data cache if internal RAM allows.
 - **Resend lost messages from the puck.** libpeer's SCTP never resends what the puck sends,
   so on a weak signal a command (a tap, a step) can be lost and the tap does nothing. Keep
   unacknowledged DATA chunks on the control channel and resend them until the SACK covers

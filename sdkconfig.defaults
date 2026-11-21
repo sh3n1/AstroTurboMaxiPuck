@@ -47,3 +47,6 @@ CONFIG_MBEDTLS_X509_CREATE_C=y
 # Keep the phone's certificate after the handshake, so its fingerprint can be checked.
 CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE=y
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# Optimised for speed (-O2), not for debugging: drawing the sky map needs it.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
