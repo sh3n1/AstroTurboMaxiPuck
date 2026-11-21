@@ -46,7 +46,7 @@ task only depends on tasks above it. "App" marks work in the app's repository
    app (`puck-link.service.ts`, `puck-messages.ts`) does each as its own button would, and
    sends `state` (night, solving), which the puck follows: night palette, dimmed rings while
    solving.
-8. **Losing and finding the link.** *Written 2026-11-21, to test on the board.* Each side
+8. **Losing and finding the link.** *Done 2026-11-21, tested on the board.* Each side
    sends something at least once a second (the app a `view`, or `state` before its map has
    drawn; the puck `ping`), and takes 4 s of silence as a lost link: the puck shows a new
    QR code with "Link lost: scan again", the app a "Puck disconnected" toast and "Link
@@ -75,7 +75,8 @@ night, no grey.
 
 ## 3. The sky map
 
-15. **App sends the catalogue.** *Written 2026-11-21, to test on the board.* The app builds
+15. **App sends the catalogue.** *Done 2026-11-21, tested: 2.1 MB with the faint stars, kept
+    in a 4 MB partition, not sent again on the next link.* The app builds
     it (`puck-catalog.ts`, tested; `puck-catalog.service.ts`): the map's stars to 6.5, the
     constellation lines and names, the fixed objects with the map's labels and label rules,
     and the data credits; about 505 KB in 32 parts. After `puckHello` it sends
@@ -86,19 +87,20 @@ night, no grey.
     shows "Receiving", "Writing", "kept", then on the next link "current". **Ask:** the
     faint stars (to magnitude 9, about 1.2 MB more) for the eyepiece view. For now the
     puck's diameter shows the width of the phone's map (`viewField`). Depends on 3, 5.
-16. **Puck projects and draws the stars.** *Written 2026-11-21, to test on the board.*
+16. **Puck projects and draws the stars.** *Done 2026-11-21, tested: the sky matches the
+    phone's; star sizes right. Still too slow to look smooth (see Improvements).*
     `main/sky_draw.c`: a full-screen canvas in PSRAM behind everything; each new view
     turns, refracts and projects the stars (brightest first, to the view's limit) and the
     constellation lines as the app does, with its tints, sizes, fading below the horizon,
     and night red. Things to check on the board: the sky matches the phone's, star sizes
     (`STAR_SCALE`), and whether 30 frames a second keep up. Depends on 9, 15.
-17. **Moving objects.** *Written 2026-11-21, to test on the board.* The app sends
+17. **Moving objects.** *Done 2026-11-21, tested: the Moon with its phase.* The app sends
     `objects` (`puck-objects.ts`, tested): the Moon, planets and bright asteroids with their
     labels, sizes and phases, once linked and once a minute. The puck reads them
     (`main/moving.c`, with the JSON readers now in `main/json_read.c`) and draws each as a
     disc of its size over the stars. Still to do: the Moon's and Venus's phase, turned to the
     Sun, and the labels (task 18). Depends on 16.
-18. **The rest of the map.** *Mostly written 2026-11-21, to test on the board.*
+18. **The rest of the map.** *Mostly done 2026-11-21, tested on the board.*
     `main/sky_objects.c` draws a top layer as the app's map does: the horizon and compass
     points, a small ring for deep-sky objects or their size circle (the Messier and bright
     ones), labels beside objects, planets and the Moon (the catalogue's labels and label
@@ -137,7 +139,7 @@ which messages it needs.
 21. **Settings → Brightness**: `board_set_brightness()`, kept in NVS. Depends on 19.
 22. **Sensors, Eyepiece, Lists, Alignment**: what each does on the puck, and the messages to
     the app. **Ask** for each. Depends on 19.
-22b. **Zoom.** *Written 2026-11-21, to test on the board.* The puck zooms on its own,
+22b. **Zoom.** *Done 2026-11-21, tested (works, not yet smooth).* The puck zooms on its own,
     apart from the phone (decided 2026-11-21): `main/zoom.c` keeps its field, and shows +,
     −, ✓ and ✗ over the map; ✓ keeps the new field, ✗ goes back. The rules (5° to 120°,
     steps of 1.5, starting at 20°, the star limits) come from the app in `mapRules`. In the
@@ -164,11 +166,17 @@ which messages it needs.
 - **ICE credentials from the hardware random generator.** *Done 2026-11-21, to test on
   the board.* libpeer seeded them from the clock, which the puck doesn't have, so someone on
   the same Wi-Fi could guess them and keep taking the pairing slot. Now `esp_random`.
+- **Smoother map.** Drawing a frame takes 125 to 175 ms, mostly the labels (LVGL renders
+  their text again every frame), then the background fill and the lines; 33 ms is needed
+  for 30 frames a second. Draw labels once and reuse them, fewer at wide fields, a quicker
+  fill, and glide between views (as the app's `pose-glide.ts`) so the map turns smoothly
+  even below 30 frames a second. `main/sky_draw.c` logs each step's time.
+- **Split `main/sky_draw.c`** (525 lines, the rule is about 500): the stars into their own file.
 - **Resend lost messages from the puck.** libpeer's SCTP never resends what the puck sends,
   so on a weak signal a command (a tap, a step) can be lost and the tap does nothing. Keep
   unacknowledged DATA chunks on the control channel and resend them until the SACK covers
   them.
-- **The QR code's slow heartbeat.** *Written 2026-11-21, to test on the board.* While the
+- **The QR code's slow heartbeat.** *Done 2026-11-21, tested; slowed to 6 s.* While the
   QR code shows, the screen's brightness swells from dim (50 of 255) to full and back every
   3 s, so a phone camera dazzled by the white AMOLED gets a darker moment to read it
   (`beat_qr` in `main/main.c`). To tune on the board: the dim level and the period.

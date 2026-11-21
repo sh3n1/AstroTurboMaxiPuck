@@ -70,18 +70,18 @@ static lv_obj_t *next_label;
 #define QR_SIZE_PX 280
 // While the QR code shows, the screen's brightness beats slowly between these, so a phone
 // camera dazzled by the bright white AMOLED gets a darker moment in every beat to read it.
-#define QR_BEAT_PERIOD_MS 3000
+#define QR_BEAT_PERIOD_MS 6000
 #define QR_BEAT_DIM 50     // of 255
 #define QR_BEAT_BRIGHT 255
 #define QR_BEAT_STEP_MS 50
 // The screen's brightness otherwise (Settings, Brightness, will set it: task 21).
 #define NORMAL_BRIGHTNESS 255
 
-// The app's reticle: three plain rings, 0.5°, 2° and 4° in radius. Until the app sends its
-// field of view, the puck's diameter shows 10° of sky.
+// The app's reticle: three plain rings, 0.5°, 2° and 4° across (the app's RETICLE_RINGS_DEG
+// are diameters). Until the app sends its field of view, the puck's diameter shows 10°.
 #define TEST_FOV_DEG 10.0f
-static const float RETICLE_RADII_DEG[] = {0.5f, 2.0f, 4.0f};
-#define RING_COUNT (sizeof(RETICLE_RADII_DEG) / sizeof(RETICLE_RADII_DEG[0]))
+static const float RETICLE_DIAMETERS_DEG[] = {0.5f, 2.0f, 4.0f};
+#define RING_COUNT (sizeof(RETICLE_DIAMETERS_DEG) / sizeof(RETICLE_DIAMETERS_DEG[0]))
 static lv_obj_t *rings[RING_COUNT];
 // How often the screen looks at the shared view state.
 #define VIEW_REFRESH_MS 33
@@ -176,15 +176,18 @@ static lv_obj_t *make_ring(lv_obj_t *screen)
 }
 
 // Sizes the rings for a field of view, with the app's stereographic projection
-// (docs/puck.md, "Drawing on the puck"): a ring of angle a has radius 2 tan(a / 2) x scale.
-// Rings bigger than the screen, or too small to see, are hidden.
-static void size_rings(float fov_deg)
+// (docs/puck.md, "Drawing on the puck"): a ring d across has radius 2 tan(d / 4) x scale.
+// Rings bigger than the screen, or too small to see, are hidden. ring_deg: in the app's ring
+// view, the one ring, the eyepiece's field, instead of the three; 0 otherwise.
+static void size_rings(float fov_deg, float ring_deg)
 {
     const float radius_px = BOARD_SCREEN_PX / 2.0f;
     const float scale = radius_px / (2.0f * tanf(fov_deg / 4.0f * DEG_TO_RAD));
     for (size_t i = 0; i < RING_COUNT; i++) {
-        int r = (int)(2.0f * tanf(RETICLE_RADII_DEG[i] / 2.0f * DEG_TO_RAD) * scale);
-        lv_obj_set_hidden(rings[i], r < 2 || r > radius_px);
+        float diameter = ring_deg > 0 ? ring_deg : RETICLE_DIAMETERS_DEG[i];
+        int r = (int)(2.0f * tanf(diameter / 4.0f * DEG_TO_RAD) * scale);
+        bool shown = ring_deg > 0 ? i == 0 : true;
+        lv_obj_set_hidden(rings[i], !shown || r < 2 || r > radius_px);
         lv_obj_set_size(rings[i], r * 2, r * 2);
         lv_obj_center(rings[i]);
     }
@@ -240,7 +243,7 @@ static void refresh_view(lv_timer_t *timer)
         lv_label_set_text(pose_label, "");
         lv_label_set_text(fov_label, "");
         lv_label_set_text(target_label, "");
-        size_rings(TEST_FOV_DEG);
+        size_rings(TEST_FOV_DEG, 0);
         sky_draw_clear(state.night);
         return;
     }
@@ -260,7 +263,13 @@ static void refresh_view(lv_timer_t *timer)
         snprintf(text, sizeof(text), "%s %.1f°", state.target_name, v->target_dist_deg);
         lv_label_set_text(target_label, text);
     }
-    if (v->fov_deg > 0 && v->fov_deg < 360) size_rings(v->fov_deg);
+    // The app's ring view: one ring, the eyepiece's field (view flag bit 3).
+    float ring_deg = (v->flags & PUCK_VIEW_FLAG_RING) ? state.eyepiece_field_deg : 0;
+    if (v->fov_deg > 0 && v->fov_deg < 360) size_rings(v->fov_deg, ring_deg);
+    // The eyepiece view has no reticle, as the app's: its circle is drawn with the sky.
+    if (v->flags & PUCK_VIEW_FLAG_EYEPIECE) {
+        for (size_t i = 0; i < RING_COUNT; i++) lv_obj_set_hidden(rings[i], true);
+    }
 }
 
 // The QR code's slow heartbeat. An LVGL timer, so it runs in the LVGL task, which also
@@ -290,7 +299,7 @@ static void draw_test_screen(void)
     // The sky map first, so the rings, labels and QR code are drawn over it.
     sky_draw_create(screen);
     for (size_t i = 0; i < RING_COUNT; i++) rings[i] = make_ring(screen);
-    size_rings(TEST_FOV_DEG);
+    size_rings(TEST_FOV_DEG, 0);
     lv_obj_add_event_cb(screen, on_tap, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_add_event_cb(screen, on_long_press, LV_EVENT_LONG_PRESSED, NULL);
 

@@ -165,9 +165,26 @@ typedef struct {
 // stay under this (docs/puck.md in the app), and the app's answer says so (max-message-size).
 #define SCTP_MAX_MESSAGE_SIZE 16384
 
-// AstroTurboMaxiPuck: how many data channel messages one incoming packet may carry. A packet
-// is at most about 1200 bytes, so more than this would be tiny messages.
-#define SCTP_MAX_MESSAGES_PER_PACKET 32
+// AstroTurboMaxiPuck: how far ahead of the last TSN received in order we keep what arrives
+// early, and the biggest chunk kept. What arrives early on an ordered channel is kept (in
+// PSRAM on the puck) and passed on in order once the gap is filled, so the other side only
+// resends what was lost, at once, rather than everything after it, after a timeout.
+#define SCTP_TSN_WINDOW 64
+#define SCTP_EARLY_CHUNK_MAX 1280
+// The receive window we advertise: what the chunks kept early can hold. Upstream advertised
+// one packet's worth (1300 bytes), which let a browser send one packet at a time, and a lost
+// one stopped everything (views too) for its resend timeout, up to seconds.
+#define SCTP_RECEIVE_WINDOW (SCTP_TSN_WINDOW * 1000)
+
+// AstroTurboMaxiPuck: counters, to see from the application's log whether the other side
+// still acknowledges what we send (a link that dies with nothing failing on our side).
+typedef struct SctpStats {
+  uint32_t data_in;        // DATA chunks received
+  uint32_t sacks_in;       // SACKs received: the other side acknowledging what we sent
+  uint32_t last_sack_cum;  // the TSN the last SACK acknowledged up to
+  uint32_t heartbeats_in;  // HEARTBEATs received (each answered)
+  uint32_t write_errors;   // DTLS writes that failed
+} SctpStats;
 
 typedef struct Sctp {
   struct socket* sock;
@@ -178,10 +195,14 @@ typedef struct Sctp {
   uint32_t verification_tag;
   uint32_t tsn;
   // AstroTurboMaxiPuck: the last DATA TSN received in order from the other side, for SACKs,
-  // and which of the next 32 TSNs have arrived early (bit i: remote_cum_tsn + 1 + i).
+  // and which of the next SCTP_TSN_WINDOW TSNs have arrived early (bit i: remote_cum_tsn + 1
+  // + i). Early chunks of ordered channels wait in early_chunks, slot TSN % SCTP_TSN_WINDOW,
+  // with their length in early_len (0: empty).
   uint32_t remote_cum_tsn;
-  uint32_t remote_tsn_mask;
+  uint64_t remote_tsn_mask;
   int remote_tsn_known;
+  uint8_t* early_chunks;     // SCTP_TSN_WINDOW × SCTP_EARLY_CHUNK_MAX bytes
+  uint16_t early_len[SCTP_TSN_WINDOW];
   // AstroTurboMaxiPuck: a message arriving in pieces. The pieces of one message have
   // consecutive TSNs, so one buffer is enough: the next piece must have the next TSN.
   uint8_t* reasm_buf;        // SCTP_MAX_MESSAGE_SIZE bytes, made with the association
@@ -190,7 +211,6 @@ typedef struct Sctp {
   uint16_t reasm_sid;
   uint32_t reasm_ppid;
   int reasm_active;          // a message's first piece came, and none is missing so far
-  int reasm_done;            // a message was completed in this packet, not yet passed on
   DtlsSrtp* dtls_srtp;
   int stream_count;
   SctpStreamEntry stream_table[SCTP_MAX_STREAMS];
@@ -203,6 +223,7 @@ typedef struct Sctp {
   void (*onclose)(void* userdata);
 
   void* userdata;
+  SctpStats stats;  // AstroTurboMaxiPuck
   uint8_t buf[CONFIG_MTU];
 } Sctp;
 

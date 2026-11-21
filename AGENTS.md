@@ -25,11 +25,15 @@ app's "Two phones" mode.
     `components/libpeer/README.md`); the binary `view` and `targetInfo` (`main/view_state.c`),
     shown on a test screen (`main/main.c`) with rings that follow the field of view; and the
     commands (reticle tap, step, night by long press) with the app's `state`.
-  - **Written, built, not yet tried on the board:** a lost link noticed both ways (`ping`,
-    4 s of silence); the sky catalogue sent by the app and kept in a 2 MB flash partition
-    (`main/catalog.c`, `partitions.csv`); the stars and constellation lines drawn behind the
-    rings (`main/sky_draw.c`); the Moon and planets (`main/moving.c`); ICE credentials from
-    the hardware random generator.
+  - **Also tested on the board (2026-11-21):** a lost link noticed both ways (`ping`, 4 s
+    of silence); the sky catalogue (2.1 MB, faint stars included) sent by the app and kept in
+    a 4 MB flash partition (`main/catalog.c`); the sky drawn behind the rings as the phone's
+    (`main/sky_draw.c`, `main/sky_objects.c`): stars, lines, grid, horizon, objects, labels,
+    the Moon and planets (`main/moving.c`), the eyepiece and ring views; the puck's own zoom
+    (`main/zoom.c`); night mode; the QR code's heartbeat. libpeer's SCTP now has a real
+    receive window and keeps early packets; the Wi-Fi and lwIP buffers are in PSRAM.
+  - **Not yet good enough:** drawing takes 125 to 175 ms a frame, so the map moves in jumps;
+    and the puck never resends what it sends, which can still drop the link.
   - Build steps are in `README.md`, libraries and their licences in `docs/third-party.md`.
     The battery (AXP2101) waits until the user has one.
 

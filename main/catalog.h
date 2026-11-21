@@ -51,5 +51,8 @@ void catalog_acknowledge(void);
 /** Drops a transfer that hasn't finished, as when the link is lost. */
 void catalog_cancel(void);
 
+/** Gives up a transfer whose parts stopped coming: FAILED, with this reason for the app. */
+void catalog_fail_receiving(const char *reason);
+
 /** The kept catalogue, memory-mapped, and its size; NULL when there is none. */
 const uint8_t *catalog_data(size_t *bytes);

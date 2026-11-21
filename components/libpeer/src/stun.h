@@ -94,6 +94,9 @@ struct StunMessage {
   Address relayed_addr;
   uint8_t buf[STUN_ATTR_BUF_SIZE];
   size_t size;
+  // AstroTurboMaxiPuck: the request carries USE-CANDIDATE: the controlling side nominates
+  // this pair (lite pairing follows it, see agent.c).
+  int use_candidate;
 };
 
 void stun_msg_create(StunMessage* msg, uint16_t type);

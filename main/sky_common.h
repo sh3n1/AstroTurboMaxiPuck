@@ -17,6 +17,20 @@
 #include "board.h"
 #include "puck_protocol.h"
 
+// ---- Drawing on the sky's canvas ----
+
+#include "lvgl.h"
+
+/**
+ * Call after each LVGL draw call on the sky's layer. LVGL queues every line, arc and label
+ * as a task until the layer is finished, in its own 64 KB of memory, which a frame's
+ * thousand or so would overflow (it did: the puck restarted on the first frame). Every
+ * SKY_LAYER_BATCH tasks, this finishes the layer, which draws and frees them, and starts it
+ * again (sky_draw.c).
+ */
+void sky_layer_step(lv_layer_t *layer);
+#define SKY_LAYER_BATCH 64
+
 // ---- The app's colours (sky-style.ts, theme.ts) ----
 
 #define SKY_COLOR_SKY 0x05070F
@@ -87,6 +101,7 @@ typedef struct {
     // Things further than this from the centre (as the cosine of the angle) are off the round
     // screen. Checked before refraction, which is the slow part, with a margin for its lift.
     float visible_cos;
+    float sky_then_view[4]; // the two rotations as one quaternion, for the quick check
 } sky_frame_t;
 
 static inline void sky_radec_vector(float ra_deg, float dec_deg, float v[3])
@@ -126,6 +141,15 @@ static inline void sky_refract(float v[3])
     v[2] = sinf(raised);
 }
 
+// The quaternion that turns by b, then by a.
+static inline void sky_quat_mul(const float a[4], const float b[4], float out[4])
+{
+    out[0] = a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3];
+    out[1] = a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2];
+    out[2] = a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1];
+    out[3] = a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0];
+}
+
 /** The frame for a view. */
 static inline sky_frame_t sky_frame(const puck_view_msg_t *view)
 {
@@ -141,15 +165,15 @@ static inline sky_frame_t sky_frame(const puck_view_msg_t *view)
     // (under 0.6°) and the biggest star's size. Wide views check nothing.
     float edge_deg = view->fov_deg / 2 + 1;
     f.visible_cos = edge_deg < 170 ? cosf(edge_deg * SKY_DEG_TO_RAD) : -2;
+    sky_quat_mul(view->view, view->sky, f.sky_then_view);
     return f;
 }
 
 /** Off the round screen for sure: far from the view's centre, refraction or not. */
 static inline bool sky_far_off(const sky_frame_t *f, const float j2000[3])
 {
-    float local[3], v[3];
-    sky_rotate(f->view->sky, j2000, local);
-    sky_rotate(f->view->view, local, v);
+    float v[3];
+    sky_rotate(f->sky_then_view, j2000, v);
     return -v[2] < f->visible_cos;
 }
 
