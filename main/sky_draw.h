@@ -16,8 +16,9 @@
  *  False when there's no memory for it. With LVGL locked. */
 bool sky_draw_create(lv_obj_t *screen);
 
-/** Draws the sky for a view. Loads the catalogue first if a new one has been kept. */
-void sky_draw_frame(const puck_view_msg_t *view, bool night);
+/** Draws the sky for a view. Loads the catalogue first if a new one has been kept.
+ *  eyepiece_field_deg: the eyepiece's true field, for its circle in the eyepiece view. */
+void sky_draw_frame(const puck_view_msg_t *view, bool night, float eyepiece_field_deg);
 
 /** Just the sky's colour, as before the first view. */
 void sky_draw_clear(bool night);

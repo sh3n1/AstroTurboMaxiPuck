@@ -109,23 +109,22 @@ night, no grey.
     outline), and their size. The compass letters come from the app (`texts`, in its
     language). Depends on 17.
 18b. **Show what the phone's map shows** (decided 2026-11-21: the same items, wherever the
-    puck can technically draw them). What the app's map draws (`sky-canvas.component.ts`,
-    `draw-sky.ts`, `draw-targets.ts`) and the puck doesn't yet:
-    - the alt-az grid (`drawGrid`);
-    - the app's own icons for galaxies, nebulae, clusters, planets, Pluto, Ceres, the
-      asteroids and the Moon (`target-icons.ts`), instead of plain rings and discs;
-    - the Moon's and Venus's phase, turned towards the Sun (`objects` already sends the lit
-      fraction and the Sun);
-    - dashed size circles, as the app's;
-    - the selected target: drawn first, in full even below the horizon, with the crosshair
-      of four rounded strokes (task 11); `targetInfo` would need its catalogue position or
-      the `view` already gives its direction and distance;
-    - the pointer to an off-screen target (`drawPointer`) and the chevrons (task 11);
-    - the reticle's solving pulse (task 12);
-    - in the eyepiece view, the eyepiece's circle and the dark mask around it
-      (`drawEyepieceMask`), and the faint stars (task 15's question);
-    - the user's own targets, not yet sent (`objects` could carry them);
-    - Greek letters in labels, such as "κ Cyg" (the font lacks them; task 9).
+    puck can technically draw them). Compared with what the app's map draws
+    (`sky-canvas.component.ts`, `draw-sky.ts`, `draw-targets.ts`):
+    - *Written 2026-11-21, to test on the board:* the alt-az grid; the Moon's and Venus's
+      phase, turned towards the Sun; dashed size circles; the eyepiece's circle and the dark
+      mask around it (the app's `state` now sends `eyepieceFieldDeg`); the selected target's
+      green crosshair, placed from the `view`'s distance and direction.
+    - Still to do:
+      - the app's own icons for galaxies, nebulae, clusters, planets, Pluto, Ceres and the
+        asteroids (`target-icons.ts`), instead of plain rings and discs;
+      - the selected target's label first and in full below the horizon (the puck doesn't
+        know which catalogue object it is: `targetInfo` could carry its label);
+      - the pointer to an off-screen target (`drawPointer`) and the chevrons (task 11);
+      - the reticle's solving pulse (task 12) and its ring labels ("2°");
+      - the faint stars in the eyepiece view (task 15's question);
+      - the user's own targets, not yet sent (`objects` could carry them);
+      - Greek letters in labels, such as "κ Cyg" (the font lacks them; task 9).
 
 ## 4. The menu
 
