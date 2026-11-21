@@ -24,7 +24,11 @@ app's "Two phones" mode.
   touch chip is a CST9217 (Waveshare's wiki wrongly says FT3168 in one place). The board shows
   up as COM3 (the ESP32-S3's own USB). Build steps are in `README.md`, libraries and their
   licences in `docs/third-party.md`. The battery (AXP2101) waits until the user has one.
-  Next: joining the Wi-Fi, then a first WebRTC link to the phone.
+  The puck joins the Wi-Fi (`main/wifi.c`) and a first WebRTC link works (`main/link_test.c`):
+  the puck serves a test page, the phone's browser POSTs its offer, libpeer answers, and the
+  data channel echoes 10 messages a second with none lost (round trip median 37 ms, worst
+  444 ms with a weak −91 dBm signal, 2026-11-21). Next: the one-QR-code pairing, so the app
+  itself (HTTPS, which can't POST to the puck's http address) can link to the puck.
 
 ## Decisions taken
 

@@ -18,6 +18,7 @@
 #include "esp_psram.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "link_test.h"
 #include "wifi.h"
 
 static const char *TAG = "puck";
@@ -27,8 +28,9 @@ static const char *TAG = "puck";
 #define COLOR_RETICLE 0xE5484D
 #define COLOR_TEXT 0xE8EBF5
 
-// The Wi-Fi status line, near the bottom of the screen.
+// The Wi-Fi and link status lines, near the bottom of the screen.
 static lv_obj_t *status_label;
+static lv_obj_t *link_label;
 
 // The app's reticle: three plain rings, 0.5°, 2° and 4° in radius. For this test the
 // puck's diameter shows 10° of sky; later the phone sends the real field of view.
@@ -83,6 +85,18 @@ static void draw_ring(lv_obj_t *screen, int radius_px)
     lv_obj_center(ring);
 }
 
+// A line of status text, centred, this far from the bottom. Big text: the puck is read at
+// arm's length in the dark.
+static lv_obj_t *make_status_label(lv_obj_t *screen, int y_from_bottom)
+{
+    lv_obj_t *label = lv_label_create(screen);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(COLOR_TEXT), 0);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, y_from_bottom);
+    lv_label_set_text(label, "");
+    return label;
+}
+
 // The sky colour with the reticle, and touches logged.
 static void draw_test_screen(void)
 {
@@ -97,18 +111,27 @@ static void draw_test_screen(void)
     }
     lv_obj_add_event_cb(screen, on_touch, LV_EVENT_PRESSED, NULL);
 
-    // Big text: the puck is read at arm's length in the dark.
-    status_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(status_label, lv_color_hex(COLOR_TEXT), 0);
-    lv_obj_align(status_label, LV_ALIGN_BOTTOM_MID, 0, -60);
-    lv_label_set_text(status_label, "");
+    status_label = make_status_label(screen, -60);
+    link_label = make_status_label(screen, -100);
     lvgl_port_unlock();
 }
 
-// Shows the Wi-Fi state on screen.
+// Shows the link test's state on screen.
+static void on_link_state(const char *text)
+{
+    lvgl_port_lock(0);
+    lv_label_set_text(link_label, text);
+    lvgl_port_unlock();
+}
+
+// Shows the Wi-Fi state on screen, and starts the link test the first time it connects.
 static void on_wifi_change(wifi_state_t state, const char *ip)
 {
+    static bool link_started = false;
+    if (state == WIFI_CONNECTED && !link_started) {
+        link_started = link_test_start(on_link_state) == ESP_OK;
+    }
+
     lvgl_port_lock(0);
     switch (state) {
     case WIFI_NOT_SET:

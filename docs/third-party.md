@@ -13,6 +13,11 @@ downloaded from the ESP Component Registry at build time (see `main/idf_componen
 | `espressif/esp_lvgl_port`                | LVGL on ESP-IDF                | Apache-2.0 | Espressif        |
 | `espressif/cmake_utilities`              | Build helpers                  | Apache-2.0 | Espressif        |
 | `lvgl/lvgl`                              | Drawing                        | MIT        | LVGL Kft         |
+| libpeer (`components/libpeer/`, our copy) | WebRTC                        | MIT        | sepfy            |
+| `sepfy/srtp` (libsrtp, needed by libpeer) | SRTP                          | BSD-3-Clause (libsrtp), MIT (ESP port) | Cisco Systems; nvannote |
+
+libpeer is copied into this repository with our changes, listed in
+`components/libpeer/README.md`.
 
 `main/board.c` takes its pins, the CO5300 start-up commands and the brightness command from
 Waveshare's board package `waveshare/esp32_s3_touch_amoled_1_75` (Apache-2.0, Copyright

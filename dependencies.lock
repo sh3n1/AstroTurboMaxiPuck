@@ -82,6 +82,13 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 9.6.0~1
+  sepfy/srtp:
+    component_hash: 5a75f043e29104975e3a0191e404a957a4d9088551842e16426a5b72e14610ae
+    dependencies: []
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.3.0
   waveshare/esp_lcd_touch_cst9217:
     component_hash: f755f8e3ae61df23413256a6a447e367a4b844538229c183ff0e89dbbdc15319
     dependencies:
@@ -101,7 +108,8 @@ direct_dependencies:
 - espressif/esp_lvgl_port
 - idf
 - lvgl/lvgl
+- sepfy/srtp
 - waveshare/esp_lcd_touch_cst9217
-manifest_hash: 33b9f30fbc3d147ec92cddfb9ecf08b86ac4b728f27c925da8e469727691ebd6
+manifest_hash: 0d775ead764c10b1b8c3ce855d5d03ddaa85ada732b7a8382afbcfaf3eeb1b20
 target: esp32s3
 version: 3.0.0

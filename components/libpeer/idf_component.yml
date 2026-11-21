@@ -1,0 +1,3 @@
+# libpeer needs libsrtp (BSD-3-Clause, Cisco) to build, for its audio and video code.
+dependencies:
+  sepfy/srtp: "^2.0.4"
