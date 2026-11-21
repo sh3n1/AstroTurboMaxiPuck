@@ -17,9 +17,10 @@ typedef struct {
     void (*show_pairing)(const char *qr_text);
     /** A short state to show, such as "Linked". */
     void (*show_state)(const char *text);
-    /** Where the telescope points, from the app's pose messages. */
-    void (*show_pose)(float alt_deg, float az_deg);
 } link_callbacks_t;
+
+// What the app sends once linked (the view, the target's name) goes to view_state.h, for
+// the screen to read on its own core.
 
 /** Starts the link task, which shows a QR code and waits for the app. Call once the Wi-Fi
  *  is connected. */

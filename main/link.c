@@ -16,6 +16,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "peer.h"
+#include "puck_protocol.h"
+#include "view_state.h"
 
 static const char *TAG = "link";
 
@@ -30,6 +32,8 @@ static const char *TAG = "link";
 #define PWD_CHARS 24
 // Once the data channel is open, the app must send its secret within this time.
 #define AUTH_TIMEOUT_US (5 * 1000 * 1000)
+// The biggest control message read; control messages are small JSON texts.
+#define CONTROL_MAX_BYTES 512
 // The link task runs on core 0, with the Wi-Fi, leaving core 1 to drawing.
 #define LINK_TASK_CORE 0
 #define LINK_TASK_STACK 16384
@@ -87,57 +91,133 @@ static bool make_qr_text(const PeerLiteInfo *info, char *out, size_t out_len)
     return true;
 }
 
-// Reads a number after "key": in a JSON text, such as "altDeg":12.5. Only for this test's
-// pose messages, which the app writes in a fixed way; the real link will be binary.
-static bool json_number(const char *json, const char *key, float *value)
+// Writes a code point as UTF-8 into out at *o, if it fits.
+static void put_utf8(unsigned code, char *out, size_t out_len, size_t *o)
+{
+    char bytes[3];
+    size_t n = 0;
+    if (code < 0x80) {
+        bytes[n++] = (char)code;
+    } else if (code < 0x800) {
+        bytes[n++] = (char)(0xC0 | code >> 6);
+        bytes[n++] = (char)(0x80 | (code & 0x3F));
+    } else {
+        bytes[n++] = (char)(0xE0 | code >> 12);
+        bytes[n++] = (char)(0x80 | (code >> 6 & 0x3F));
+        bytes[n++] = (char)(0x80 | (code & 0x3F));
+    }
+    if (*o + n >= out_len) return; // keep whole characters only
+    memcpy(out + *o, bytes, n);
+    *o += n;
+}
+
+// Reads the string after "key": in a JSON text, such as "name":"Crab Nebula", into out.
+// Handles the escapes JSON.stringify writes; other characters, Greek letters among them,
+// come as they are, in UTF-8. Our messages are small and flat, so no JSON library is needed.
+static bool json_string(const char *json, const char *key, char *out, size_t out_len)
 {
     char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    const char *at = strstr(json, pattern);
-    if (!at) return false;
-    char *end;
-    *value = strtof(at + strlen(pattern), &end);
-    return end != at + strlen(pattern);
+    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p || out_len == 0) return false;
+    p += strlen(pattern);
+    size_t o = 0;
+    while (*p && *p != '"') {
+        unsigned code = (unsigned char)*p++;
+        if (code == '\\') {
+            char e = *p++;
+            switch (e) {
+            case 'n': code = '\n'; break;
+            case 't': code = '\t'; break;
+            case 'r': code = '\r'; break;
+            case 'b': code = '\b'; break;
+            case 'f': code = '\f'; break;
+            case 'u':
+                if (sscanf(p, "%4x", &code) != 1) return false;
+                p += 4;
+                break;
+            case '\0': return false;
+            default: code = (unsigned char)e; break; // \" \\ \/
+            }
+            put_utf8(code, out, out_len, &o);
+        } else if (o + 1 < out_len) {
+            out[o++] = (char)code; // a byte as it is, part of UTF-8 or not
+        }
+    }
+    out[o] = '\0';
+    return *p == '"';
+}
+
+// A binary view, from the view channel. See puck_protocol.h and the app's docs/puck.md.
+static void on_view(const char *message, size_t length)
+{
+    puck_view_msg_t view;
+    if (length < sizeof(view)) return;
+    memcpy(&view, message, sizeof(view));
+    // Unknown types and versions are ignored, so the app can add new ones.
+    if (view.type != PUCK_VIEW_TYPE || view.version != PUCK_VIEW_VERSION) return;
+    view_state_set_view(&view);
+    // How many views arrive: about 30 a second while the map moves, 1 when still.
+    static unsigned views;
+    if (++views % 300 == 0) {
+        ESP_LOGI(TAG, "%u views received (Alt %.1f, Az %.1f, FOV %.1f)", views, view.alt_deg,
+                 view.az_deg, view.fov_deg);
+    }
+}
+
+// A JSON message on the control channel, once the app is known.
+static void on_control(const char *text)
+{
+    // The target's name: {"t":"targetInfo","id":"M1","name":"Crab Nebula"}, id null for none.
+    if (strstr(text, "\"t\":\"targetInfo\"")) {
+        char name[VIEW_STATE_NAME_BYTES];
+        if (!json_string(text, "name", name, sizeof(name))) name[0] = '\0';
+        view_state_set_target(name);
+        ESP_LOGI(TAG, "Target: %s", name[0] ? name : "(none)");
+    }
+}
+
+// Checks the app's first message, which must be its secret.
+static void check_auth(const char *text)
+{
+    if (!strstr(text, "\"t\":\"auth\"")) return;
+    char expected[64];
+    snprintf(expected, sizeof(expected), "\"secret\":\"%s\"", secret_text);
+    if (strstr(text, expected)) {
+        authenticated = true;
+        ESP_LOGI(TAG, "App paired");
+        ui.show_state("Linked");
+    } else {
+        ESP_LOGW(TAG, "Wrong secret: dropping the link");
+        restart_needed = true;
+    }
 }
 
 // Runs inside peer_connection_loop.
 static void on_message(char *message, size_t length, void *user_data, uint16_t stream_id)
 {
-    char text[512];
+    // The view channel carries only binary views, and they count only once the app is known.
+    uint16_t view_sid;
+    if (peer_connection_lookup_sid(connection, PUCK_CHANNEL_VIEW, &view_sid) == 0 &&
+        stream_id == view_sid) {
+        if (authenticated) on_view(message, length);
+        return;
+    }
+
+    char text[CONTROL_MAX_BYTES];
     if (length >= sizeof(text)) {
-        // Not a message this test reads; logged, to see messages put together from pieces.
-        ESP_LOGI(TAG, "Message of %u bytes on stream %u", (unsigned)length, stream_id);
+        ESP_LOGW(TAG, "Message of %u bytes on stream %u: too big, skipped", (unsigned)length,
+                 stream_id);
         return;
     }
     memcpy(text, message, length);
     text[length] = '\0';
 
+    // Only the auth message counts before the secret is known to be right.
     if (!authenticated) {
-        // Only the auth message counts before the secret is known to be right.
-        if (!strstr(text, "\"t\":\"auth\"")) return;
-        char expected[64];
-        snprintf(expected, sizeof(expected), "\"secret\":\"%s\"", secret_text);
-        if (strstr(text, expected)) {
-            authenticated = true;
-            ESP_LOGI(TAG, "App paired");
-            ui.show_state("Linked");
-        } else {
-            ESP_LOGW(TAG, "Wrong secret: dropping the link");
-            restart_needed = true;
-        }
-        return;
-    }
-
-    // The app's pose: {"t":"pose",...,"pointing":{"altDeg":..,"azDeg":..},...}
-    if (strstr(text, "\"t\":\"pose\"")) {
-        const char *pointing = strstr(text, "\"pointing\":");
-        float alt, az;
-        if (pointing && json_number(pointing, "altDeg", &alt) && json_number(pointing, "azDeg", &az)) {
-            ui.show_pose(alt, az);
-        }
-        // How many poses arrive: about 20 a second while the phone moves, 1 when still.
-        static int poses;
-        if (++poses % 100 == 0) ESP_LOGI(TAG, "%d poses received", poses);
+        check_auth(text);
+    } else {
+        on_control(text);
     }
 }
 
@@ -179,6 +259,7 @@ static bool start_pairing(void)
     esp_fill_random(secret, sizeof(secret));
     base64url(secret, sizeof(secret), secret_text);
     authenticated = false;
+    view_state_clear();
     channel_open_time = 0;
     restart_needed = false;
 

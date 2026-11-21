@@ -6,9 +6,11 @@
 // For now a bring-up check of the board: it logs the chip, flash and PSRAM, then tests the
 // screen (red, green and blue, then the app's sky colour with its three reticle rings), logs
 // every touch, and joins the Wi-Fi, showing the puck's address on screen. Then it shows a QR
-// code for the app to pair with, and once linked, where the telescope points (Alt, Az).
+// code for the app to pair with, and once linked, what the app's view says: where the
+// telescope points (Alt, Az), the field of view (the rings follow it), and the target.
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -22,6 +24,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "link.h"
+#include "view_state.h"
 #include "wifi.h"
 
 static const char *TAG = "puck";
@@ -36,17 +39,25 @@ static lv_obj_t *status_label;
 static lv_obj_t *link_label;
 // The pairing QR code, in the middle, shown until the app links.
 static lv_obj_t *pairing_qr;
-// Where the telescope points, near the top, once linked.
+// Where the telescope points and the field of view, near the top, once linked.
 static lv_obj_t *pose_label;
+static lv_obj_t *fov_label;
+// The target's name and how far it is, above the status lines.
+static lv_obj_t *target_label;
 
 // The QR code's size: it fits well inside the round screen, with big enough squares for a
 // phone camera at arm's length.
 #define QR_SIZE_PX 280
 
-// The app's reticle: three plain rings, 0.5°, 2° and 4° in radius. For this test the
-// puck's diameter shows 10° of sky; later the phone sends the real field of view.
+// The app's reticle: three plain rings, 0.5°, 2° and 4° in radius. Until the app sends its
+// field of view, the puck's diameter shows 10° of sky.
 #define TEST_FOV_DEG 10.0f
 static const float RETICLE_RADII_DEG[] = {0.5f, 2.0f, 4.0f};
+#define RING_COUNT (sizeof(RETICLE_RADII_DEG) / sizeof(RETICLE_RADII_DEG[0]))
+static lv_obj_t *rings[RING_COUNT];
+// How often the screen looks at the shared view state.
+#define VIEW_REFRESH_MS 33
+#define DEG_TO_RAD 0.017453292f
 
 // Print the chip, flash and PSRAM details once at start-up.
 static void log_board_info(void)
@@ -83,17 +94,31 @@ static void on_touch(lv_event_t *event)
     ESP_LOGI(TAG, "Touch at %d, %d", (int)point.x, (int)point.y);
 }
 
-// Draws one plain ring, centred on the screen.
-static void draw_ring(lv_obj_t *screen, int radius_px)
+// One plain ring, centred on the screen.
+static lv_obj_t *make_ring(lv_obj_t *screen)
 {
     lv_obj_t *ring = lv_obj_create(screen);
     lv_obj_remove_style_all(ring);
-    lv_obj_set_size(ring, radius_px * 2, radius_px * 2);
     lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(ring, 3, 0);
     lv_obj_set_style_border_color(ring, lv_color_hex(COLOR_RETICLE), 0);
     lv_obj_set_clickable(ring, false); // touches go to the screen behind
-    lv_obj_center(ring);
+    return ring;
+}
+
+// Sizes the rings for a field of view, with the app's stereographic projection
+// (docs/puck.md, "Drawing on the puck"): a ring of angle a has radius 2 tan(a / 2) x scale.
+// Rings bigger than the screen, or too small to see, are hidden.
+static void size_rings(float fov_deg)
+{
+    const float radius_px = BOARD_SCREEN_PX / 2.0f;
+    const float scale = radius_px / (2.0f * tanf(fov_deg / 4.0f * DEG_TO_RAD));
+    for (size_t i = 0; i < RING_COUNT; i++) {
+        int r = (int)(2.0f * tanf(RETICLE_RADII_DEG[i] / 2.0f * DEG_TO_RAD) * scale);
+        lv_obj_set_hidden(rings[i], r < 2 || r > radius_px);
+        lv_obj_set_size(rings[i], r * 2, r * 2);
+        lv_obj_center(rings[i]);
+    }
 }
 
 // A line of status text, centred, this far from the bottom. Big text: the puck is read at
@@ -109,23 +134,63 @@ static lv_obj_t *make_status_label(lv_obj_t *screen, int y_from_bottom)
 }
 
 // The sky colour with the reticle, and touches logged.
+// Shows the newest view from the app. An LVGL timer: it runs in the LVGL task, on core 1,
+// with LVGL already locked.
+static void refresh_view(lv_timer_t *timer)
+{
+    static uint32_t shown_count;
+    static char shown_target[VIEW_STATE_NAME_BYTES];
+    static bool shown_view;
+    view_state_t state;
+    view_state_get(&state);
+    if (state.has_view == shown_view && state.view_count == shown_count &&
+        strcmp(state.target_name, shown_target) == 0) {
+        return; // nothing new
+    }
+    shown_view = state.has_view;
+    shown_count = state.view_count;
+    strcpy(shown_target, state.target_name);
+
+    if (!state.has_view) {
+        lv_label_set_text(pose_label, "");
+        lv_label_set_text(fov_label, "");
+        lv_label_set_text(target_label, "");
+        size_rings(TEST_FOV_DEG);
+        return;
+    }
+    const puck_view_msg_t *v = &state.view;
+    char text[96];
+    snprintf(text, sizeof(text), "Alt %.1f°  Az %.1f°", v->alt_deg, v->az_deg);
+    lv_label_set_text(pose_label, text);
+    snprintf(text, sizeof(text), "FOV %.1f°", v->fov_deg);
+    lv_label_set_text(fov_label, text);
+    if (isnan(v->target_dist_deg)) {
+        lv_label_set_text(target_label, state.target_name);
+    } else {
+        snprintf(text, sizeof(text), "%s %.1f°", state.target_name, v->target_dist_deg);
+        lv_label_set_text(target_label, text);
+    }
+    if (v->fov_deg > 0 && v->fov_deg < 360) size_rings(v->fov_deg);
+}
+
 static void draw_test_screen(void)
 {
-    const float px_per_deg = BOARD_SCREEN_PX / TEST_FOV_DEG;
-
     lvgl_port_lock(0);
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(COLOR_SKY), 0);
     lv_obj_set_scrollable(screen, false);
-    for (size_t i = 0; i < sizeof(RETICLE_RADII_DEG) / sizeof(RETICLE_RADII_DEG[0]); i++) {
-        draw_ring(screen, (int)(RETICLE_RADII_DEG[i] * px_per_deg));
-    }
+    for (size_t i = 0; i < RING_COUNT; i++) rings[i] = make_ring(screen);
+    size_rings(TEST_FOV_DEG);
     lv_obj_add_event_cb(screen, on_touch, LV_EVENT_PRESSED, NULL);
 
     status_label = make_status_label(screen, -40);
     link_label = make_status_label(screen, -75);
+    target_label = make_status_label(screen, -115);
     pose_label = make_status_label(screen, 0);
     lv_obj_align(pose_label, LV_ALIGN_TOP_MID, 0, 50);
+    fov_label = make_status_label(screen, 0);
+    lv_obj_align(fov_label, LV_ALIGN_TOP_MID, 0, 88);
+    lv_timer_create(refresh_view, VIEW_REFRESH_MS, NULL);
 
     // Dark squares on white, as cameras read best, with the quiet zone around it.
     pairing_qr = lv_qrcode_create(screen);
@@ -145,7 +210,6 @@ static void show_pairing(const char *qr_text)
     lv_qrcode_update(pairing_qr, qr_text, strlen(qr_text));
     lv_obj_set_hidden(pairing_qr, false);
     lv_label_set_text(link_label, "Scan in the app");
-    lv_label_set_text(pose_label, "");
     lvgl_port_unlock();
 }
 
@@ -157,15 +221,6 @@ static void show_link_state(const char *text)
     lvgl_port_unlock();
 }
 
-static void show_pose(float alt_deg, float az_deg)
-{
-    char text[48];
-    snprintf(text, sizeof(text), "Alt %.1f°  Az %.1f°", alt_deg, az_deg);
-    lvgl_port_lock(0);
-    lv_label_set_text(pose_label, text);
-    lvgl_port_unlock();
-}
-
 // Shows the Wi-Fi state on screen, and starts the link the first time it connects.
 static void on_wifi_change(wifi_state_t state, const char *ip)
 {
@@ -174,7 +229,6 @@ static void on_wifi_change(wifi_state_t state, const char *ip)
         static const link_callbacks_t callbacks = {
             .show_pairing = show_pairing,
             .show_state = show_link_state,
-            .show_pose = show_pose,
         };
         link_started = link_start(&callbacks) == ESP_OK;
     }

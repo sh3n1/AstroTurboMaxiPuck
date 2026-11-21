@@ -31,12 +31,15 @@ task only depends on tasks above it. "App" marks work in the app's repository
    the puck is only a remote. The puck's link is now its own (`puck-link.service.ts` in the
    app), apart from Two phones, so a screen phone of two devices can have both. Until task
    5 it sends a JSON `pose` on the `view` channel, which the test firmware shows.
-5. **App sends the view** (App, `puck-link.service.ts`): when linked to the puck, send the
-   binary `view` of `docs/puck.md` at about 30 Hz on its own unreliable channel, and
-   `targetInfo` (the target's name) on every change. Depends on 3, 4.
-6. **Puck reads the view**: parse `view` and `targetInfo` in `main/link.c`, replacing the
-   test's text search, and hand them to the screen through a small shared state, safe
-   between core 0 (link) and core 1 (drawing). Depends on 3, 5.
+5. **App sends the view** (App, `puck-link.service.ts`). *Done 2026-11-21, tested with the
+   puck: about 30 views a second.* The map publishes each frame (`map-view.service.ts`),
+   `puck-view.ts` packs it into the 68-byte binary `view`, sent on its own unreliable
+   channel, and `targetInfo` goes on every change.
+6. **Puck reads the view.** *Done 2026-11-21, tested.* `main/link.c` reads `view` (on the
+   channel found by its label) and `targetInfo`; `main/view_state.c` hands them from core 0
+   to core 1, dropping late views; the test screen shows Alt, Az, the field of view, the
+   target and its distance, and sizes the rings by the field of view. Greek letters in
+   names don't show yet: the font lacks them (task 9).
 7. **Puck sends commands** (App receives): `solveNow` (reticle tap), `step` (left and right
    arrows), `night`. The app handles `step` with its playlist (`playlist.service.ts`).
    Depends on 3, 6.

@@ -32,6 +32,9 @@ Every change is marked with an `AstroTurboMaxiPuck:` comment.
   one packet. Now the pieces (B and E flags, consecutive TSNs) are put back together in one
   buffer of `SCTP_MAX_MESSAGE_SIZE` (16 KB, allocated with the association); a message with
   a missing piece is dropped.
+- `sctp.c`: a DATA_CHANNEL_OPEN's label is kept with its stream again (our rewrite of the
+  packet reading had only acknowledged it), so `peer_connection_lookup_sid` finds channels
+  by label.
 - `sctp.c` test hook `SCTP_TEST_DROP_EVERY` (set in `CMakeLists.txt`, 0 is off): acts as if
   every Nth incoming DATA chunk was lost, to test resends and FORWARD-TSN.
 - **Lite pairing**, for the puck's one-QR-code pairing: `peer_connection_start_lite()` in
