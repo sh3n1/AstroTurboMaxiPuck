@@ -167,6 +167,10 @@ which messages it needs.
   so on a weak signal a command (a tap, a step) can be lost and the tap does nothing. Keep
   unacknowledged DATA chunks on the control channel and resend them until the SACK covers
   them.
+- **The QR code's slow heartbeat.** *Written 2026-11-21, to test on the board.* While the
+  QR code shows, the screen's brightness swells from dim (50 of 255) to full and back every
+  3 s, so a phone camera dazzled by the white AMOLED gets a darker moment to read it
+  (`beat_qr` in `main/main.c`). To tune on the board: the dim level and the period.
 - **Hide the QR code after a few minutes of waiting**, with a tap on the screen to show it
   again (with fresh credentials and secret), so it isn't left on screen for anyone to scan.
 - **Remove the lite pairing check logging** in `components/libpeer/src/agent.c` once pairing
