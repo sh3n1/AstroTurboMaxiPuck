@@ -14,6 +14,7 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "peer.h"
 #include "puck_protocol.h"
@@ -34,6 +35,9 @@ static const char *TAG = "link";
 #define AUTH_TIMEOUT_US (5 * 1000 * 1000)
 // The biggest control message read; control messages are small JSON texts.
 #define CONTROL_MAX_BYTES 512
+// Commands waiting for the link task to send them, and the biggest one.
+#define COMMAND_QUEUE_LENGTH 8
+#define COMMAND_MAX_BYTES 96
 // The link task runs on core 0, with the Wi-Fi, leaving core 1 to drawing.
 #define LINK_TASK_CORE 0
 #define LINK_TASK_STACK 16384
@@ -45,6 +49,7 @@ static char secret_text[32];          // the secret in base64url, as the app sen
 static bool authenticated;
 static int64_t channel_open_time;     // 0 until the data channel opens
 static volatile bool restart_needed;  // set in libpeer's callbacks, acted on by the task
+static QueueHandle_t commands;        // from the screen, sent by the link task
 
 // Bytes as base64url without padding, as the app's pairing codes use.
 static void base64url(const uint8_t *in, size_t len, char *out)
@@ -148,6 +153,24 @@ static bool json_string(const char *json, const char *key, char *out, size_t out
     return *p == '"';
 }
 
+// Reads true or false after "key": in a JSON text, such as "night":true.
+static bool json_bool(const char *json, const char *key, bool *value)
+{
+    char pattern[32];
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    const char *p = strstr(json, pattern);
+    if (!p) return false;
+    p += strlen(pattern);
+    if (strncmp(p, "true", 4) == 0) {
+        *value = true;
+    } else if (strncmp(p, "false", 5) == 0) {
+        *value = false;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 // A binary view, from the view channel. See puck_protocol.h and the app's docs/puck.md.
 static void on_view(const char *message, size_t length)
 {
@@ -174,6 +197,38 @@ static void on_control(const char *text)
         if (!json_string(text, "name", name, sizeof(name))) name[0] = '\0';
         view_state_set_target(name);
         ESP_LOGI(TAG, "Target: %s", name[0] ? name : "(none)");
+    }
+    // What the puck shows besides the map: {"t":"state","night":false,"solving":false,...}
+    else if (strstr(text, "\"t\":\"state\"")) {
+        bool night = false, solving = false;
+        json_bool(text, "night", &night);
+        json_bool(text, "solving", &solving);
+        view_state_set_app_state(night, solving);
+        ESP_LOGI(TAG, "State: night %d, solving %d", night, solving);
+    }
+}
+
+bool link_send_command(const char *json)
+{
+    if (!commands || !authenticated || strlen(json) >= COMMAND_MAX_BYTES) return false;
+    char item[COMMAND_MAX_BYTES];
+    strcpy(item, json);
+    return xQueueSend(commands, item, 0) == pdTRUE;
+}
+
+// Sends the queued commands on the control channel. Runs in the link task: libpeer is only
+// used from there.
+static void send_commands(void)
+{
+    char item[COMMAND_MAX_BYTES];
+    while (xQueueReceive(commands, item, 0) == pdTRUE) {
+        uint16_t sid;
+        if (!authenticated ||
+            peer_connection_lookup_sid(connection, PUCK_CHANNEL_CONTROL, &sid) != 0) {
+            continue; // not linked any more: dropped
+        }
+        ESP_LOGI(TAG, "Sending %s", item);
+        peer_connection_datachannel_send_sid(connection, item, strlen(item), sid);
     }
 }
 
@@ -280,6 +335,7 @@ static void link_task(void *arg)
     }
     for (;;) {
         peer_connection_loop(connection);
+        send_commands();
 
         bool auth_late = channel_open_time && !authenticated &&
                          esp_timer_get_time() - channel_open_time > AUTH_TIMEOUT_US;
@@ -296,6 +352,8 @@ static void link_task(void *arg)
 esp_err_t link_start(const link_callbacks_t *callbacks)
 {
     ui = *callbacks;
+    commands = xQueueCreate(COMMAND_QUEUE_LENGTH, COMMAND_MAX_BYTES);
+    ESP_RETURN_ON_FALSE(commands, ESP_ERR_NO_MEM, TAG, "command queue");
     ESP_RETURN_ON_FALSE(peer_init() == 0, ESP_FAIL, TAG, "libpeer init");
     BaseType_t ok = xTaskCreatePinnedToCore(link_task, "link", LINK_TASK_STACK, NULL, 5, NULL,
                                             LINK_TASK_CORE);

@@ -5,9 +5,11 @@
 //
 // For now a bring-up check of the board: it logs the chip, flash and PSRAM, then tests the
 // screen (red, green and blue, then the app's sky colour with its three reticle rings), logs
-// every touch, and joins the Wi-Fi, showing the puck's address on screen. Then it shows a QR
+// touches, and joins the Wi-Fi, showing the puck's address on screen. Then it shows a QR
 // code for the app to pair with, and once linked, what the app's view says: where the
 // telescope points (Alt, Az), the field of view (the rings follow it), and the target.
+// Taps send the app commands: the reticle plate solves, the edges step through the list,
+// and a long press switches night mode, which the screen follows.
 
 #include <inttypes.h>
 #include <math.h>
@@ -33,6 +35,15 @@ static const char *TAG = "puck";
 #define COLOR_SKY 0x05070F
 #define COLOR_RETICLE 0xE5484D
 #define COLOR_TEXT 0xE8EBF5
+// Night mode: full-strength red on black, no grey (the app's AGENTS.md).
+#define COLOR_NIGHT 0xFF0000
+#define COLOR_NIGHT_SKY 0x000000
+
+// Touch zones of the test screen, until the real layout (docs/screen-layout.md): a tap
+// within this distance of the centre plate solves; one within this distance of the left or
+// right edge steps through the list playing on the phone. A long press switches night mode.
+#define SOLVE_TAP_RADIUS_PX 110
+#define STEP_TAP_EDGE_PX 120
 
 // The Wi-Fi and link status lines, near the bottom of the screen.
 static lv_obj_t *status_label;
@@ -44,6 +55,9 @@ static lv_obj_t *pose_label;
 static lv_obj_t *fov_label;
 // The target's name and how far it is, above the status lines.
 static lv_obj_t *target_label;
+// The previous and next arrows, at the left and right edges.
+static lv_obj_t *previous_label;
+static lv_obj_t *next_label;
 
 // The QR code's size: it fits well inside the round screen, with big enough squares for a
 // phone camera at arm's length.
@@ -86,12 +100,48 @@ static void fill_screen(uint32_t color)
     lvgl_port_unlock();
 }
 
-// Logs where the screen was touched.
-static void on_touch(lv_event_t *event)
+// A short tap: plate solve on the reticle, step at the edges (docs/puck.md, "Control
+// messages"). Runs in the LVGL task; the link sends the command from its own task.
+static void on_tap(lv_event_t *event)
 {
     lv_point_t point;
     lv_indev_get_point(lv_indev_active(), &point);
-    ESP_LOGI(TAG, "Touch at %d, %d", (int)point.x, (int)point.y);
+    const int dx = point.x - BOARD_SCREEN_PX / 2;
+    const int dy = point.y - BOARD_SCREEN_PX / 2;
+    ESP_LOGI(TAG, "Tap at %d, %d", (int)point.x, (int)point.y);
+
+    view_state_t state;
+    view_state_get(&state);
+    if (dx * dx + dy * dy < SOLVE_TAP_RADIUS_PX * SOLVE_TAP_RADIUS_PX) {
+        if (!state.solving) link_send_command("{\"t\":\"solveNow\",\"trigger\":\"tap\"}");
+    } else if (point.x < STEP_TAP_EDGE_PX) {
+        link_send_command("{\"t\":\"step\",\"by\":-1}");
+    } else if (point.x > BOARD_SCREEN_PX - STEP_TAP_EDGE_PX) {
+        link_send_command("{\"t\":\"step\",\"by\":1}");
+    }
+}
+
+// A long press anywhere: night mode on or off, on the phone too.
+static void on_long_press(lv_event_t *event)
+{
+    view_state_t state;
+    view_state_get(&state);
+    link_send_command(state.night ? "{\"t\":\"night\",\"on\":false}" : "{\"t\":\"night\",\"on\":true}");
+}
+
+// Every text and ring in the day's colours, or night's full-strength red.
+static void apply_palette(bool night)
+{
+    const lv_color_t text = lv_color_hex(night ? COLOR_NIGHT : COLOR_TEXT);
+    lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(night ? COLOR_NIGHT_SKY : COLOR_SKY), 0);
+    lv_obj_t *labels[] = {status_label, link_label, target_label, pose_label, fov_label,
+                          previous_label, next_label};
+    for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
+        lv_obj_set_style_text_color(labels[i], text, 0);
+    }
+    for (size_t i = 0; i < RING_COUNT; i++) {
+        lv_obj_set_style_border_color(rings[i], lv_color_hex(night ? COLOR_NIGHT : COLOR_RETICLE), 0);
+    }
 }
 
 // One plain ring, centred on the screen.
@@ -133,16 +183,26 @@ static lv_obj_t *make_status_label(lv_obj_t *screen, int y_from_bottom)
     return label;
 }
 
-// The sky colour with the reticle, and touches logged.
-// Shows the newest view from the app. An LVGL timer: it runs in the LVGL task, on core 1,
-// with LVGL already locked.
+// Shows the newest view and state from the app. An LVGL timer: it runs in the LVGL task, on
+// core 1, with LVGL already locked.
 static void refresh_view(lv_timer_t *timer)
 {
     static uint32_t shown_count;
     static char shown_target[VIEW_STATE_NAME_BYTES];
-    static bool shown_view;
+    static bool shown_view, shown_night, shown_solving;
     view_state_t state;
     view_state_get(&state);
+    if (state.night != shown_night) {
+        shown_night = state.night;
+        apply_palette(state.night);
+    }
+    if (state.solving != shown_solving) {
+        // Plate solving: the rings dim until it ends (task 12 makes them pulse, as the app).
+        shown_solving = state.solving;
+        for (size_t i = 0; i < RING_COUNT; i++) {
+            lv_obj_set_style_border_opa(rings[i], state.solving ? LV_OPA_40 : LV_OPA_COVER, 0);
+        }
+    }
     if (state.has_view == shown_view && state.view_count == shown_count &&
         strcmp(state.target_name, shown_target) == 0) {
         return; // nothing new
@@ -150,6 +210,8 @@ static void refresh_view(lv_timer_t *timer)
     shown_view = state.has_view;
     shown_count = state.view_count;
     strcpy(shown_target, state.target_name);
+    lv_obj_set_hidden(previous_label, !state.has_view);
+    lv_obj_set_hidden(next_label, !state.has_view);
 
     if (!state.has_view) {
         lv_label_set_text(pose_label, "");
@@ -181,7 +243,8 @@ static void draw_test_screen(void)
     lv_obj_set_scrollable(screen, false);
     for (size_t i = 0; i < RING_COUNT; i++) rings[i] = make_ring(screen);
     size_rings(TEST_FOV_DEG);
-    lv_obj_add_event_cb(screen, on_touch, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(screen, on_tap, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(screen, on_long_press, LV_EVENT_LONG_PRESSED, NULL);
 
     status_label = make_status_label(screen, -40);
     link_label = make_status_label(screen, -75);
@@ -190,6 +253,14 @@ static void draw_test_screen(void)
     lv_obj_align(pose_label, LV_ALIGN_TOP_MID, 0, 50);
     fov_label = make_status_label(screen, 0);
     lv_obj_align(fov_label, LV_ALIGN_TOP_MID, 0, 88);
+    previous_label = make_status_label(screen, 0);
+    lv_label_set_text(previous_label, LV_SYMBOL_LEFT);
+    lv_obj_align(previous_label, LV_ALIGN_LEFT_MID, 30, 0);
+    next_label = make_status_label(screen, 0);
+    lv_label_set_text(next_label, LV_SYMBOL_RIGHT);
+    lv_obj_align(next_label, LV_ALIGN_RIGHT_MID, -30, 0);
+    lv_obj_set_hidden(previous_label, true);
+    lv_obj_set_hidden(next_label, true);
     lv_timer_create(refresh_view, VIEW_REFRESH_MS, NULL);
 
     // Dark squares on white, as cameras read best, with the quiet zone around it.

@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 /** What the link tells the screen. Called from the link task: keep short, lock LVGL. */
@@ -19,8 +21,12 @@ typedef struct {
     void (*show_state)(const char *text);
 } link_callbacks_t;
 
-// What the app sends once linked (the view, the target's name) goes to view_state.h, for
-// the screen to read on its own core.
+// What the app sends once linked (the view, the target's name, its state) goes to
+// view_state.h, for the screen to read on its own core.
+
+/** Sends a small JSON command to the app, such as {"t":"step","by":1}, from any task. It is
+ *  queued and sent by the link task; dropped (false) when not linked or the queue is full. */
+bool link_send_command(const char *json);
 
 /** Starts the link task, which shows a QR code and waits for the app. Call once the Wi-Fi
  *  is connected. */

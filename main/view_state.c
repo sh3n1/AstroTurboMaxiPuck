@@ -46,11 +46,21 @@ void view_state_set_target(const char *name)
     taskEXIT_CRITICAL(&lock);
 }
 
+void view_state_set_app_state(bool night, bool solving)
+{
+    taskENTER_CRITICAL(&lock);
+    state.night = night;
+    state.solving = solving;
+    taskEXIT_CRITICAL(&lock);
+}
+
 void view_state_clear(void)
 {
     taskENTER_CRITICAL(&lock);
     state.has_view = false;
     state.target_name[0] = '\0';
+    state.solving = false;
+    // Night mode stays as it was: the screen mustn't flash bright when the link drops.
     taskEXIT_CRITICAL(&lock);
 }
 

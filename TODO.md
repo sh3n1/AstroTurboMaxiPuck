@@ -40,9 +40,12 @@ task only depends on tasks above it. "App" marks work in the app's repository
    to core 1, dropping late views; the test screen shows Alt, Az, the field of view, the
    target and its distance, and sizes the rings by the field of view. Greek letters in
    names don't show yet: the font lacks them (task 9).
-7. **Puck sends commands** (App receives): `solveNow` (reticle tap), `step` (left and right
-   arrows), `night`. The app handles `step` with its playlist (`playlist.service.ts`).
-   Depends on 3, 6.
+7. **Puck sends commands.** *Done 2026-11-21, tested: the app answers in 30 to 140 ms.* On
+   the test screen, a tap on the reticle sends `solveNow`, taps at the left and right edges
+   `step`, and a long press `night`; `link_send_command` queues them for the link task. The
+   app (`puck-link.service.ts`, `puck-messages.ts`) does each as its own button would, and
+   sends `state` (night, solving), which the puck follows: night palette, dimmed rings while
+   solving.
 8. **Losing and finding the link**: the puck notices a silent link (no `view` for 4 s),
    says so, and shows a new QR code; the app shows "link lost" as for two phones.
 
@@ -121,6 +124,10 @@ which messages it needs.
   are predictable. Someone on the same Wi-Fi could guess them and keep taking the pairing
   slot (they can't pair without the secret, but they could stop the user from pairing). Use
   `esp_fill_random`, as the secret does.
+- **Resend lost messages from the puck.** libpeer's SCTP never resends what the puck sends,
+  so on a weak signal a command (a tap, a step) can be lost and the tap does nothing. Keep
+  unacknowledged DATA chunks on the control channel and resend them until the SACK covers
+  them.
 - **Hide the QR code after a few minutes of waiting**, with a tap on the screen to show it
   again (with fresh credentials and secret), so it isn't left on screen for anyone to scan.
 - **Remove the lite pairing check logging** in `components/libpeer/src/agent.c` once pairing
