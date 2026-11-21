@@ -24,6 +24,8 @@ CONFIG_FREERTOS_HZ=1000
 
 # Big text for reading at arm's length
 CONFIG_LV_FONT_MONTSERRAT_28=y
+# Labels on the sky map (main/sky_objects.c).
+CONFIG_LV_FONT_MONTSERRAT_20=y
 # QR codes, for pairing with the app (Nayuki's QR generator, MIT, inside LVGL)
 CONFIG_LV_USE_QRCODE=y
 # Don't compile LVGL's own examples and demos: hundreds of files the puck never uses.
