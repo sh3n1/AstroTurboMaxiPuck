@@ -353,6 +353,8 @@ int peer_connection_loop(PeerConnection* pc) {
           LOGW("Unknown data");
         }
       }
+      // AstroTurboMaxiPuck: what the other side hasn't acknowledged in time goes again.
+      if (pc->config.datachannel) sctp_resend_due(&pc->sctp);
 
 #if CONFIG_STUN_KEEPALIVE_INTERVAL > 0
       {
@@ -558,13 +560,15 @@ const char* peer_connection_create_answer(PeerConnection* pc) {
 
 // AstroTurboMaxiPuck: lite pairing, see peer_connection.h.
 void peer_connection_sctp_stats(PeerConnection* pc, uint32_t* data_in, uint32_t* sacks_in, uint32_t* last_sack_cum,
-                                uint32_t* next_tsn, uint32_t* heartbeats_in, uint32_t* write_errors) {
+                                uint32_t* next_tsn, uint32_t* heartbeats_in, uint32_t* write_errors,
+                                uint32_t* resent) {
   *data_in = pc->sctp.stats.data_in;
   *sacks_in = pc->sctp.stats.sacks_in;
   *last_sack_cum = pc->sctp.stats.last_sack_cum;
   *next_tsn = pc->sctp.tsn;
   *heartbeats_in = pc->sctp.stats.heartbeats_in;
   *write_errors = pc->sctp.stats.write_errors;
+  *resent = pc->sctp.stats.resent;
 }
 
 int peer_connection_lite_peer_found(PeerConnection* pc) {

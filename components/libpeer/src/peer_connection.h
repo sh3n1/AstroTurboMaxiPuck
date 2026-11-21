@@ -152,7 +152,8 @@ int peer_connection_lite_peer_found(PeerConnection* pc);
 
 /** AstroTurboMaxiPuck: the SCTP counters (sctp.h, SctpStats) and our next TSN. */
 void peer_connection_sctp_stats(PeerConnection* pc, uint32_t* data_in, uint32_t* sacks_in, uint32_t* last_sack_cum,
-                                uint32_t* next_tsn, uint32_t* heartbeats_in, uint32_t* write_errors);
+                                uint32_t* next_tsn, uint32_t* heartbeats_in, uint32_t* write_errors,
+                                uint32_t* resent);
 
 /**
  * @brief register callback function to handle packet loss from RTCP receiver report

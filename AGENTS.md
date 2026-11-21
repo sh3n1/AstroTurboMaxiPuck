@@ -35,8 +35,8 @@ app's "Two phones" mode.
     receive window and keeps early packets; the Wi-Fi and lwIP buffers are in PSRAM.
   - **Smooth since 2026-11-21:** 46 to 60 ms a frame, and the view glides between
     messages (`main/view_glide.c`).
-  - **Not yet good enough:** the puck never resends what it sends, which can still drop
-    the link.
+  - **The link resends both ways since 2026-11-21:** the puck now resends what the phone
+    doesn't acknowledge (`components/libpeer/src/sctp.c`, `sctp_resend_due`).
   - Build steps are in `README.md`, libraries and their licences in `docs/third-party.md`.
     The battery (AXP2101) waits until the user has one.
 

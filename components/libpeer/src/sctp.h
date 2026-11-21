@@ -184,7 +184,27 @@ typedef struct SctpStats {
   uint32_t last_sack_cum;  // the TSN the last SACK acknowledged up to
   uint32_t heartbeats_in;  // HEARTBEATs received (each answered)
   uint32_t write_errors;   // DTLS writes that failed
+  uint32_t resent;         // DATA chunks we sent again, unacknowledged in time
+  uint32_t resend_dropped; // DATA chunks given up unacknowledged, the queue being full
 } SctpStats;
+
+// AstroTurboMaxiPuck: what we sent and the other side hasn't acknowledged yet, kept to send
+// again. Upstream sent each DATA chunk once: one lost packet left a gap the browser waited on
+// for ever. A chunk unacknowledged after SCTP_RESEND_FIRST_MS is sent again, then after twice
+// as long each time, up to SCTP_RESEND_MAX_MS. Our TSNs count up one by one, so the chunk
+// with TSN t waits in slot t % SCTP_SEND_QUEUE.
+#define SCTP_SEND_QUEUE 32
+#define SCTP_RESEND_FIRST_MS 300
+#define SCTP_RESEND_MAX_MS 2000
+#define SCTP_RESEND_BURST 4  // the most sent again in one round of the loop
+
+typedef struct SctpSent {
+  uint32_t tsn;
+  uint16_t len;       // the chunk's length, without padding; 0: nothing kept
+  uint8_t acked;      // acknowledged by a SACK's gap block, ahead of the cumulative TSN
+  uint32_t sent_ms;   // when last sent
+  uint32_t wait_ms;   // how long to wait for its acknowledgement before sending it again
+} SctpSent;
 
 typedef struct Sctp {
   struct socket* sock;
@@ -211,6 +231,11 @@ typedef struct Sctp {
   uint16_t reasm_sid;
   uint32_t reasm_ppid;
   int reasm_active;          // a message's first piece came, and none is missing so far
+  // AstroTurboMaxiPuck: what we sent, from send_una (the oldest TSN not yet acknowledged)
+  // up to tsn, to send again (see SCTP_SEND_QUEUE).
+  uint32_t send_una;
+  SctpSent sent[SCTP_SEND_QUEUE];
+  uint8_t* sent_chunks;      // SCTP_SEND_QUEUE × SCTP_MTU bytes, made with the association
   DtlsSrtp* dtls_srtp;
   int stream_count;
   SctpStreamEntry stream_table[SCTP_MAX_STREAMS];
@@ -230,6 +255,10 @@ typedef struct Sctp {
 int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp);
 
 void sctp_destroy_association(Sctp* sctp);
+
+/** AstroTurboMaxiPuck: sends again what the other side hasn't acknowledged in time. Call
+ *  on every round of the connection's loop. */
+void sctp_resend_due(Sctp* sctp);
 
 void sctp_usrsctp_init();
 

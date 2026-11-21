@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "dtls_srtp.h"
+#include "ports.h"
 #include "sctp.h"
 #include "utils.h"
 #if CONFIG_USE_USRSCTP
@@ -101,6 +102,88 @@ static int sctp_outgoing_data_cb(void* userdata, void* buf, size_t len, uint8_t 
 }
 
 #if !CONFIG_USE_USRSCTP
+// AstroTurboMaxiPuck: keeps a DATA chunk just sent, to send again until acknowledged.
+static void sctp_keep_sent(Sctp* sctp, const SctpDataChunk* chunk) {
+  uint16_t len = ntohs(chunk->length);
+  if (!sctp->sent_chunks || len > SCTP_MTU) return;
+  uint32_t tsn = ntohl(chunk->tsn);
+  // The queue is full: the oldest is given up, unacknowledged, as upstream gave up every one.
+  while ((int32_t)(tsn - sctp->send_una) >= SCTP_SEND_QUEUE) {
+    sctp->send_una++;
+    sctp->stats.resend_dropped++;
+  }
+  unsigned slot = tsn % SCTP_SEND_QUEUE;
+  memcpy(sctp->sent_chunks + slot * SCTP_MTU, chunk, len);
+  sctp->sent[slot] = (SctpSent){.tsn = tsn, .len = len, .acked = 0, .sent_ms = ports_get_epoch_time(),
+                                .wait_ms = SCTP_RESEND_FIRST_MS};
+}
+
+// AstroTurboMaxiPuck: test hook, set in CMakeLists.txt: true for every Nth DATA chunk we
+// send, which then isn't sent the first time, as if lost on the way, to test our resends.
+static int sctp_test_drop_sent(void) {
+#if SCTP_TEST_DROP_SENT_EVERY > 0
+  static unsigned test_chunks;
+  if (++test_chunks % SCTP_TEST_DROP_SENT_EVERY == 0) {
+    LOGI("test: not sending a DATA chunk the first time");
+    return 1;
+  }
+#endif
+  return 0;
+}
+
+// AstroTurboMaxiPuck: a SACK: everything up to its cumulative TSN is acknowledged, and so are
+// the runs its gap blocks list after it.
+static void sctp_take_sack(Sctp* sctp, const uint8_t* chunk, uint16_t chunk_len) {
+  const SctpSackChunk* sack = (const SctpSackChunk*)chunk;
+  uint32_t cum = ntohl(sack->cumulative_tsn_ack);
+  // Only forwards, and never past what we sent.
+  if ((int32_t)(cum + 1 - sctp->send_una) > 0 && (int32_t)(sctp->tsn - (cum + 1)) >= 0) {
+    sctp->send_una = cum + 1;
+  }
+  uint16_t blocks = ntohs(sack->number_of_gap_ack_blocks);
+  for (uint16_t i = 0; i < blocks && sizeof(SctpSackChunk) + (i + 1) * 4u <= chunk_len; i++) {
+    uint16_t start, end;
+    memcpy(&start, sack->blocks + i * 4, 2);
+    memcpy(&end, sack->blocks + i * 4 + 2, 2);
+    for (uint32_t offset = ntohs(start); offset <= ntohs(end); offset++) {
+      uint32_t tsn = cum + offset;
+      if ((int32_t)(tsn - sctp->send_una) < 0 || (int32_t)(sctp->tsn - tsn) <= 0) continue;
+      SctpSent* s = &sctp->sent[tsn % SCTP_SEND_QUEUE];
+      if (s->tsn == tsn) s->acked = 1;
+    }
+  }
+}
+#endif
+
+void sctp_resend_due(Sctp* sctp) {
+#if !CONFIG_USE_USRSCTP
+  if (!sctp->connected || !sctp->sent_chunks) return;
+  uint32_t now = ports_get_epoch_time();
+  int resent = 0;
+  for (uint32_t tsn = sctp->send_una; tsn != sctp->tsn && resent < SCTP_RESEND_BURST; tsn++) {
+    unsigned slot = tsn % SCTP_SEND_QUEUE;
+    SctpSent* s = &sctp->sent[slot];
+    if (s->tsn != tsn || s->len == 0 || s->acked || now - s->sent_ms < s->wait_ms) continue;
+    // The chunk as it was first sent, in a packet of its own.
+    SctpPacket* packet = (SctpPacket*)sctp->buf;
+    packet->header.source_port = htons(sctp->local_port);
+    packet->header.destination_port = htons(sctp->remote_port);
+    packet->header.verification_tag = sctp->verification_tag;
+    memcpy(packet->chunks, sctp->sent_chunks + slot * SCTP_MTU, s->len);
+    size_t length = 4 * ((sizeof(SctpPacket) + s->len + 3) / 4);
+    memset(packet->chunks + s->len, 0, length - sizeof(SctpPacket) - s->len);
+    packet->header.checksum = 0;
+    packet->header.checksum = sctp_get_checksum(sctp, sctp->buf, length);
+    sctp_write(sctp, sctp->buf, length);
+    s->sent_ms = now;
+    s->wait_ms = s->wait_ms * 2 > SCTP_RESEND_MAX_MS ? SCTP_RESEND_MAX_MS : s->wait_ms * 2;
+    sctp->stats.resent++;
+    resent++;
+  }
+#endif
+}
+
+#if !CONFIG_USE_USRSCTP
 static int sctp_next_stream_sequence(Sctp* sctp, uint16_t sid, uint16_t* sequence) {
   int i;
 
@@ -171,7 +254,8 @@ int sctp_outgoing_data(Sctp* sctp, char* buf, size_t len, SctpDataPpid ppid, uin
 
     packet->header.checksum = sctp_get_checksum(sctp, (const uint8_t*)sctp->buf, SCTP_MTU);
 
-    sctp_outgoing_data_cb(sctp, sctp->buf, SCTP_MTU, 0, 0);
+    sctp_keep_sent(sctp, chunk);
+    if (!sctp_test_drop_sent()) sctp_outgoing_data_cb(sctp, sctp->buf, SCTP_MTU, 0, 0);
     chunk->iube = ppid == PPID_CONTROL ? 0x00 : 0x04;
     len -= payload_max;
     pos += payload_max;
@@ -189,7 +273,8 @@ int sctp_outgoing_data(Sctp* sctp, char* buf, size_t len, SctpDataPpid ppid, uin
 
     packet->header.checksum = sctp_get_checksum(sctp, (const uint8_t*)sctp->buf, padding_len);
 
-    sctp_outgoing_data_cb(sctp, sctp->buf, padding_len, 0, 0);
+    sctp_keep_sent(sctp, chunk);
+    if (!sctp_test_drop_sent()) sctp_outgoing_data_cb(sctp, sctp->buf, padding_len, 0, 0);
   }
 #endif
   return len;
@@ -556,6 +641,7 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         }
         sctp->stats.sacks_in++;
         sctp->stats.last_sack_cum = ntohl(((SctpSackChunk*)(buf + pos))->cumulative_tsn_ack);
+        sctp_take_sack(sctp, (const uint8_t*)(buf + pos), chunk_len);
 #if 0
         LOGD("SCTP_SACK");
         sack = (SctpSackChunk*)in_packet->chunks;
@@ -696,6 +782,7 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
       ack_chunk->ppid = htonl(DATA_CHANNEL_PPID_CONTROL);
       ack_chunk->length = htons(1 + sizeof(SctpDataChunk));
       ack_chunk->data[0] = DATA_CHANNEL_ACK;
+      sctp_keep_sent(sctp, ack_chunk);
       length += ntohs(ack_chunk->length);
     }
 
@@ -815,6 +902,10 @@ int sctp_create_association(Sctp* sctp, DtlsSrtp* dtls_srtp) {
   // The chunks kept early: big, so in PSRAM on the puck too.
   if (!sctp->early_chunks) sctp->early_chunks = malloc(SCTP_TSN_WINDOW * SCTP_EARLY_CHUNK_MAX);
   memset(sctp->early_len, 0, sizeof(sctp->early_len));
+  // What we send, kept until acknowledged: in PSRAM on the puck too.
+  if (!sctp->sent_chunks) sctp->sent_chunks = malloc(SCTP_SEND_QUEUE * SCTP_MTU);
+  memset(sctp->sent, 0, sizeof(sctp->sent));
+  sctp->send_una = sctp->tsn;
 #endif
   sctp->outgoing_stream_count = 0;
   memset(sctp->outgoing_streams, 0, sizeof(sctp->outgoing_streams));
@@ -961,6 +1052,8 @@ void sctp_destroy_association(Sctp* sctp) {
     sctp->reasm_buf = NULL;
     free(sctp->early_chunks);
     sctp->early_chunks = NULL;
+    free(sctp->sent_chunks);
+    sctp->sent_chunks = NULL;
   }
 #endif
 }
