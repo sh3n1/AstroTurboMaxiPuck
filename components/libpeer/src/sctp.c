@@ -197,6 +197,31 @@ void sctp_add_stream_mapping(Sctp* sctp, const char* label, uint16_t sid) {
     LOGE("Stream table full. Cannot add more streams.");
 }
 
+#if !CONFIG_USE_USRSCTP
+// AstroTurboMaxiPuck: keeps a DATA_CHANNEL_OPEN's label with its stream, so the application
+// can tell channels apart (peer_connection_lookup_sid). The open is acknowledged elsewhere.
+static void sctp_remember_channel_label(Sctp* sctp, uint16_t sid, const char* data, size_t length) {
+  if (length < 12) {
+    return;
+  }
+  uint16_t label_length = ntohs(*(const uint16_t*)(data + 8));
+  if (length < 12u + label_length) {
+    return;
+  }
+  for (int i = 0; i < sctp->stream_count; i++) {
+    if (sctp->stream_table[i].sid == sid) {
+      return;  // already known
+    }
+  }
+  char label[sizeof(sctp->stream_table[0].label)];
+  size_t n = label_length < sizeof(label) - 1 ? label_length : sizeof(label) - 1;
+  memcpy(label, data + 12, n);
+  label[n] = '\0';
+  LOGI("Data channel \"%s\" on stream %u", label, sid);
+  sctp_add_stream_mapping(sctp, label, sid);
+}
+#endif
+
 void sctp_parse_data_channel_open(Sctp* sctp, uint16_t sid, char* data, size_t length) {
   if (length < 12)
     return;  // Not enough data for a DATA_CHANNEL_OPEN message
@@ -429,6 +454,7 @@ void sctp_incoming_data(Sctp* sctp, char* buf, size_t len) {
         if (ppid == DATA_CHANNEL_PPID_CONTROL && payload_len > 0 &&
             data_chunk->data[0] == DATA_CHANNEL_OPEN) {
           open_sid = sid;
+          sctp_remember_channel_label(sctp, sid, (const char*)data_chunk->data, payload_len);
         } else if ((ppid == DATA_CHANNEL_PPID_DOMSTRING || ppid == DATA_CHANNEL_PPID_BINARY) &&
                    message_count < SCTP_MAX_MESSAGES_PER_PACKET) {
           messages[message_count].data = (char*)data_chunk->data;

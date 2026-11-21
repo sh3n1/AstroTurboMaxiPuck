@@ -14,8 +14,11 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "peer.h"
+#include "puck_protocol.h"
+#include "view_state.h"
 
 static const char *TAG = "link";
 
@@ -30,6 +33,11 @@ static const char *TAG = "link";
 #define PWD_CHARS 24
 // Once the data channel is open, the app must send its secret within this time.
 #define AUTH_TIMEOUT_US (5 * 1000 * 1000)
+// The biggest control message read; control messages are small JSON texts.
+#define CONTROL_MAX_BYTES 512
+// Commands waiting for the link task to send them, and the biggest one.
+#define COMMAND_QUEUE_LENGTH 8
+#define COMMAND_MAX_BYTES 96
 // The link task runs on core 0, with the Wi-Fi, leaving core 1 to drawing.
 #define LINK_TASK_CORE 0
 #define LINK_TASK_STACK 16384
@@ -41,6 +49,7 @@ static char secret_text[32];          // the secret in base64url, as the app sen
 static bool authenticated;
 static int64_t channel_open_time;     // 0 until the data channel opens
 static volatile bool restart_needed;  // set in libpeer's callbacks, acted on by the task
+static QueueHandle_t commands;        // from the screen, sent by the link task
 
 // Bytes as base64url without padding, as the app's pairing codes use.
 static void base64url(const uint8_t *in, size_t len, char *out)
@@ -87,57 +96,183 @@ static bool make_qr_text(const PeerLiteInfo *info, char *out, size_t out_len)
     return true;
 }
 
-// Reads a number after "key": in a JSON text, such as "altDeg":12.5. Only for this test's
-// pose messages, which the app writes in a fixed way; the real link will be binary.
-static bool json_number(const char *json, const char *key, float *value)
+// Writes a code point as UTF-8 into out at *o, if it fits.
+static void put_utf8(unsigned code, char *out, size_t out_len, size_t *o)
+{
+    char bytes[3];
+    size_t n = 0;
+    if (code < 0x80) {
+        bytes[n++] = (char)code;
+    } else if (code < 0x800) {
+        bytes[n++] = (char)(0xC0 | code >> 6);
+        bytes[n++] = (char)(0x80 | (code & 0x3F));
+    } else {
+        bytes[n++] = (char)(0xE0 | code >> 12);
+        bytes[n++] = (char)(0x80 | (code >> 6 & 0x3F));
+        bytes[n++] = (char)(0x80 | (code & 0x3F));
+    }
+    if (*o + n >= out_len) return; // keep whole characters only
+    memcpy(out + *o, bytes, n);
+    *o += n;
+}
+
+// Reads the string after "key": in a JSON text, such as "name":"Crab Nebula", into out.
+// Handles the escapes JSON.stringify writes; other characters, Greek letters among them,
+// come as they are, in UTF-8. Our messages are small and flat, so no JSON library is needed.
+static bool json_string(const char *json, const char *key, char *out, size_t out_len)
+{
+    char pattern[32];
+    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
+    const char *p = strstr(json, pattern);
+    if (!p || out_len == 0) return false;
+    p += strlen(pattern);
+    size_t o = 0;
+    while (*p && *p != '"') {
+        unsigned code = (unsigned char)*p++;
+        if (code == '\\') {
+            char e = *p++;
+            switch (e) {
+            case 'n': code = '\n'; break;
+            case 't': code = '\t'; break;
+            case 'r': code = '\r'; break;
+            case 'b': code = '\b'; break;
+            case 'f': code = '\f'; break;
+            case 'u':
+                if (sscanf(p, "%4x", &code) != 1) return false;
+                p += 4;
+                break;
+            case '\0': return false;
+            default: code = (unsigned char)e; break; // \" \\ \/
+            }
+            put_utf8(code, out, out_len, &o);
+        } else if (o + 1 < out_len) {
+            out[o++] = (char)code; // a byte as it is, part of UTF-8 or not
+        }
+    }
+    out[o] = '\0';
+    return *p == '"';
+}
+
+// Reads true or false after "key": in a JSON text, such as "night":true.
+static bool json_bool(const char *json, const char *key, bool *value)
 {
     char pattern[32];
     snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    const char *at = strstr(json, pattern);
-    if (!at) return false;
-    char *end;
-    *value = strtof(at + strlen(pattern), &end);
-    return end != at + strlen(pattern);
+    const char *p = strstr(json, pattern);
+    if (!p) return false;
+    p += strlen(pattern);
+    if (strncmp(p, "true", 4) == 0) {
+        *value = true;
+    } else if (strncmp(p, "false", 5) == 0) {
+        *value = false;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+// A binary view, from the view channel. See puck_protocol.h and the app's docs/puck.md.
+static void on_view(const char *message, size_t length)
+{
+    puck_view_msg_t view;
+    if (length < sizeof(view)) return;
+    memcpy(&view, message, sizeof(view));
+    // Unknown types and versions are ignored, so the app can add new ones.
+    if (view.type != PUCK_VIEW_TYPE || view.version != PUCK_VIEW_VERSION) return;
+    view_state_set_view(&view);
+    // How many views arrive: about 30 a second while the map moves, 1 when still.
+    static unsigned views;
+    if (++views % 300 == 0) {
+        ESP_LOGI(TAG, "%u views received (Alt %.1f, Az %.1f, FOV %.1f)", views, view.alt_deg,
+                 view.az_deg, view.fov_deg);
+    }
+}
+
+// A JSON message on the control channel, once the app is known.
+static void on_control(const char *text)
+{
+    // The target's name: {"t":"targetInfo","id":"M1","name":"Crab Nebula"}, id null for none.
+    if (strstr(text, "\"t\":\"targetInfo\"")) {
+        char name[VIEW_STATE_NAME_BYTES];
+        if (!json_string(text, "name", name, sizeof(name))) name[0] = '\0';
+        view_state_set_target(name);
+        ESP_LOGI(TAG, "Target: %s", name[0] ? name : "(none)");
+    }
+    // What the puck shows besides the map: {"t":"state","night":false,"solving":false,...}
+    else if (strstr(text, "\"t\":\"state\"")) {
+        bool night = false, solving = false;
+        json_bool(text, "night", &night);
+        json_bool(text, "solving", &solving);
+        view_state_set_app_state(night, solving);
+        ESP_LOGI(TAG, "State: night %d, solving %d", night, solving);
+    }
+}
+
+bool link_send_command(const char *json)
+{
+    if (!commands || !authenticated || strlen(json) >= COMMAND_MAX_BYTES) return false;
+    char item[COMMAND_MAX_BYTES];
+    strcpy(item, json);
+    return xQueueSend(commands, item, 0) == pdTRUE;
+}
+
+// Sends the queued commands on the control channel. Runs in the link task: libpeer is only
+// used from there.
+static void send_commands(void)
+{
+    char item[COMMAND_MAX_BYTES];
+    while (xQueueReceive(commands, item, 0) == pdTRUE) {
+        uint16_t sid;
+        if (!authenticated ||
+            peer_connection_lookup_sid(connection, PUCK_CHANNEL_CONTROL, &sid) != 0) {
+            continue; // not linked any more: dropped
+        }
+        ESP_LOGI(TAG, "Sending %s", item);
+        peer_connection_datachannel_send_sid(connection, item, strlen(item), sid);
+    }
+}
+
+// Checks the app's first message, which must be its secret.
+static void check_auth(const char *text)
+{
+    if (!strstr(text, "\"t\":\"auth\"")) return;
+    char expected[64];
+    snprintf(expected, sizeof(expected), "\"secret\":\"%s\"", secret_text);
+    if (strstr(text, expected)) {
+        authenticated = true;
+        ESP_LOGI(TAG, "App paired");
+        ui.show_state("Linked");
+    } else {
+        ESP_LOGW(TAG, "Wrong secret: dropping the link");
+        restart_needed = true;
+    }
 }
 
 // Runs inside peer_connection_loop.
 static void on_message(char *message, size_t length, void *user_data, uint16_t stream_id)
 {
-    char text[512];
+    // The view channel carries only binary views, and they count only once the app is known.
+    uint16_t view_sid;
+    if (peer_connection_lookup_sid(connection, PUCK_CHANNEL_VIEW, &view_sid) == 0 &&
+        stream_id == view_sid) {
+        if (authenticated) on_view(message, length);
+        return;
+    }
+
+    char text[CONTROL_MAX_BYTES];
     if (length >= sizeof(text)) {
-        // Not a message this test reads; logged, to see messages put together from pieces.
-        ESP_LOGI(TAG, "Message of %u bytes on stream %u", (unsigned)length, stream_id);
+        ESP_LOGW(TAG, "Message of %u bytes on stream %u: too big, skipped", (unsigned)length,
+                 stream_id);
         return;
     }
     memcpy(text, message, length);
     text[length] = '\0';
 
+    // Only the auth message counts before the secret is known to be right.
     if (!authenticated) {
-        // Only the auth message counts before the secret is known to be right.
-        if (!strstr(text, "\"t\":\"auth\"")) return;
-        char expected[64];
-        snprintf(expected, sizeof(expected), "\"secret\":\"%s\"", secret_text);
-        if (strstr(text, expected)) {
-            authenticated = true;
-            ESP_LOGI(TAG, "App paired");
-            ui.show_state("Linked");
-        } else {
-            ESP_LOGW(TAG, "Wrong secret: dropping the link");
-            restart_needed = true;
-        }
-        return;
-    }
-
-    // The app's pose: {"t":"pose",...,"pointing":{"altDeg":..,"azDeg":..},...}
-    if (strstr(text, "\"t\":\"pose\"")) {
-        const char *pointing = strstr(text, "\"pointing\":");
-        float alt, az;
-        if (pointing && json_number(pointing, "altDeg", &alt) && json_number(pointing, "azDeg", &az)) {
-            ui.show_pose(alt, az);
-        }
-        // How many poses arrive: about 20 a second while the phone moves, 1 when still.
-        static int poses;
-        if (++poses % 100 == 0) ESP_LOGI(TAG, "%d poses received", poses);
+        check_auth(text);
+    } else {
+        on_control(text);
     }
 }
 
@@ -179,6 +314,7 @@ static bool start_pairing(void)
     esp_fill_random(secret, sizeof(secret));
     base64url(secret, sizeof(secret), secret_text);
     authenticated = false;
+    view_state_clear();
     channel_open_time = 0;
     restart_needed = false;
 
@@ -199,6 +335,7 @@ static void link_task(void *arg)
     }
     for (;;) {
         peer_connection_loop(connection);
+        send_commands();
 
         bool auth_late = channel_open_time && !authenticated &&
                          esp_timer_get_time() - channel_open_time > AUTH_TIMEOUT_US;
@@ -215,6 +352,8 @@ static void link_task(void *arg)
 esp_err_t link_start(const link_callbacks_t *callbacks)
 {
     ui = *callbacks;
+    commands = xQueueCreate(COMMAND_QUEUE_LENGTH, COMMAND_MAX_BYTES);
+    ESP_RETURN_ON_FALSE(commands, ESP_ERR_NO_MEM, TAG, "command queue");
     ESP_RETURN_ON_FALSE(peer_init() == 0, ESP_FAIL, TAG, "libpeer init");
     BaseType_t ok = xTaskCreatePinnedToCore(link_task, "link", LINK_TASK_STACK, NULL, 5, NULL,
                                             LINK_TASK_CORE);
