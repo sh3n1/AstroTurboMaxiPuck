@@ -20,6 +20,7 @@
 #include "json_read.h"
 #include "moving.h"
 #include "peer.h"
+#include "texts.h"
 #include "puck_protocol.h"
 #include "view_state.h"
 
@@ -143,6 +144,11 @@ static void on_control(const char *text)
         json_bool(text, "solving", &solving);
         view_state_set_app_state(night, solving);
         ESP_LOGI(TAG, "State: night %d, solving %d", night, solving);
+    }
+    // The words to show, in the app's language: {"t":"texts","compass":{...},"credits":".."}
+    else if (strstr(text, "\"t\":\"texts\"")) {
+        texts_parse(text);
+        ESP_LOGI(TAG, "The app's words received");
     }
     // What moves: {"t":"objects","sun":{...},"items":[...]}
     else if (strstr(text, "\"t\":\"objects\"")) {

@@ -106,10 +106,26 @@ night, no grey.
     constellation names last. The shared maths and colours are in `main/sky_common.h`;
     labels use LVGL's Montserrat 20 (turned on in `sdkconfig.defaults`). Things to check on
     the board: that labels keep the frame quick (each is drawn five times, for its dark
-    outline), and their size. Still to do: the app's own icons for galaxies, nebulae and
-    planets (`target-icons.ts`), dashed size circles, the alt-az grid, the Moon's and
-    Venus's phase, and Greek letters in labels (the font lacks them; see task 9).
-    Depends on 17.
+    outline), and their size. The compass letters come from the app (`texts`, in its
+    language). Depends on 17.
+18b. **Show what the phone's map shows** (decided 2026-11-21: the same items, wherever the
+    puck can technically draw them). What the app's map draws (`sky-canvas.component.ts`,
+    `draw-sky.ts`, `draw-targets.ts`) and the puck doesn't yet:
+    - the alt-az grid (`drawGrid`);
+    - the app's own icons for galaxies, nebulae, clusters, planets, Pluto, Ceres, the
+      asteroids and the Moon (`target-icons.ts`), instead of plain rings and discs;
+    - the Moon's and Venus's phase, turned towards the Sun (`objects` already sends the lit
+      fraction and the Sun);
+    - dashed size circles, as the app's;
+    - the selected target: drawn first, in full even below the horizon, with the crosshair
+      of four rounded strokes (task 11); `targetInfo` would need its catalogue position or
+      the `view` already gives its direction and distance;
+    - the pointer to an off-screen target (`drawPointer`) and the chevrons (task 11);
+    - the reticle's solving pulse (task 12);
+    - in the eyepiece view, the eyepiece's circle and the dark mask around it
+      (`drawEyepieceMask`), and the faint stars (task 15's question);
+    - the user's own targets, not yet sent (`objects` could carry them);
+    - Greek letters in labels, such as "κ Cyg" (the font lacks them; task 9).
 
 ## 4. The menu
 
