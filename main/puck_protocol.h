@@ -11,6 +11,11 @@
 // The data channels, told apart by label.
 #define PUCK_CHANNEL_CONTROL "astroturbomaxisolver"
 #define PUCK_CHANNEL_VIEW "astroturbomaxisolver-view"
+#define PUCK_CHANNEL_CATALOG "astroturbomaxisolver-catalog"
+
+// The puck's screen, for puckHello.
+#define PUCK_SCREEN_PX 466
+#define PUCK_PROTOCOL_VERSION 1
 
 // The binary `view`: where the app's map points, about 30 a second. Little-endian, as the
 // ESP32-S3 is, so it is copied from the message as it comes.

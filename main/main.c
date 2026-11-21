@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "catalog.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
@@ -26,6 +27,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "link.h"
+#include "sky_draw.h"
 #include "view_state.h"
 #include "wifi.h"
 
@@ -192,7 +194,8 @@ static void refresh_view(lv_timer_t *timer)
     static bool shown_view, shown_night, shown_solving;
     view_state_t state;
     view_state_get(&state);
-    if (state.night != shown_night) {
+    bool night_changed = state.night != shown_night;
+    if (night_changed) {
         shown_night = state.night;
         apply_palette(state.night);
     }
@@ -203,7 +206,7 @@ static void refresh_view(lv_timer_t *timer)
             lv_obj_set_style_border_opa(rings[i], state.solving ? LV_OPA_40 : LV_OPA_COVER, 0);
         }
     }
-    if (state.has_view == shown_view && state.view_count == shown_count &&
+    if (!night_changed && state.has_view == shown_view && state.view_count == shown_count &&
         strcmp(state.target_name, shown_target) == 0) {
         return; // nothing new
     }
@@ -218,9 +221,11 @@ static void refresh_view(lv_timer_t *timer)
         lv_label_set_text(fov_label, "");
         lv_label_set_text(target_label, "");
         size_rings(TEST_FOV_DEG);
+        sky_draw_clear(state.night);
         return;
     }
     const puck_view_msg_t *v = &state.view;
+    sky_draw_frame(v, state.night);
     char text[96];
     snprintf(text, sizeof(text), "Alt %.1f°  Az %.1f°", v->alt_deg, v->az_deg);
     lv_label_set_text(pose_label, text);
@@ -241,6 +246,8 @@ static void draw_test_screen(void)
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(COLOR_SKY), 0);
     lv_obj_set_scrollable(screen, false);
+    // The sky map first, so the rings, labels and QR code are drawn over it.
+    sky_draw_create(screen);
     for (size_t i = 0; i < RING_COUNT; i++) rings[i] = make_ring(screen);
     size_rings(TEST_FOV_DEG);
     lv_obj_add_event_cb(screen, on_tap, LV_EVENT_SHORT_CLICKED, NULL);
@@ -275,12 +282,12 @@ static void draw_test_screen(void)
 }
 
 // The link's callbacks (link.h), run in the link task.
-static void show_pairing(const char *qr_text)
+static void show_pairing(const char *qr_text, bool after_loss)
 {
     lvgl_port_lock(0);
     lv_qrcode_update(pairing_qr, qr_text, strlen(qr_text));
     lv_obj_set_hidden(pairing_qr, false);
-    lv_label_set_text(link_label, "Scan in the app");
+    lv_label_set_text(link_label, after_loss ? "Link lost: scan again" : "Scan in the app");
     lvgl_port_unlock();
 }
 
@@ -327,6 +334,8 @@ void app_main(void)
 
     ESP_LOGI(TAG, "AstroTurboMaxiPuck starting");
     log_board_info();
+    // The sky catalogue kept from an earlier link, if any. Without one the app sends it.
+    catalog_init();
 
     if (!board_start()) {
         ESP_LOGE(TAG, "Screen didn't start");
