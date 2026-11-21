@@ -23,6 +23,8 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     # Test hook (our addition in sctp.c): act as if every Nth incoming DATA chunk was lost.
     # 0 is off; only for testing resends and FORWARD-TSN.
     SCTP_TEST_DROP_EVERY=0
+    # And every Nth DATA chunk we send, the first time only: to test our resends.
+    SCTP_TEST_DROP_SENT_EVERY=0
 )
 
 # libpeer has warnings (switches without every case, and similar) that ESP-IDF would turn

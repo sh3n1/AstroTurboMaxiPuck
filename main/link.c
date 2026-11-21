@@ -447,12 +447,12 @@ static void link_task(void *arg)
                      (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
             if (authenticated) {
-                uint32_t data_in, sacks_in, sack_cum, next_tsn, heartbeats, write_errors;
+                uint32_t data_in, sacks_in, sack_cum, next_tsn, heartbeats, write_errors, resent;
                 peer_connection_sctp_stats(connection, &data_in, &sacks_in, &sack_cum, &next_tsn, &heartbeats,
-                                           &write_errors);
+                                           &write_errors, &resent);
                 ESP_LOGI(TAG, "SCTP: %u chunks in, %u SACKs in (acked to %u, our next %u), %u heartbeats, "
-                         "%u write errors", (unsigned)data_in, (unsigned)sacks_in, (unsigned)sack_cum,
-                         (unsigned)next_tsn, (unsigned)heartbeats, (unsigned)write_errors);
+                         "%u write errors, %u resent", (unsigned)data_in, (unsigned)sacks_in, (unsigned)sack_cum,
+                         (unsigned)next_tsn, (unsigned)heartbeats, (unsigned)write_errors, (unsigned)resent);
             }
         }
         bool auth_late = channel_open_time && !authenticated && now - channel_open_time > AUTH_TIMEOUT_US;

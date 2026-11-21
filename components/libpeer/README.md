@@ -55,7 +55,13 @@ Every change is marked with an `AstroTurboMaxiPuck:` comment.
   what was lost is resent. Messages are passed on as they are taken, in TSN order, so a
   channel's messages keep their order; the SACK is built afterwards.
 - `sctp.c` test hook `SCTP_TEST_DROP_EVERY` (set in `CMakeLists.txt`, 0 is off): acts as if
-  every Nth incoming DATA chunk was lost, to test resends and FORWARD-TSN.
+  every Nth incoming DATA chunk was lost, to test resends and FORWARD-TSN. Likewise
+  `SCTP_TEST_DROP_SENT_EVERY` skips sending every Nth of our DATA chunks the first time.
+- **Resending what we send**, in `sctp.c` and `sctp.h` (`SCTP_SEND_QUEUE`,
+  `sctp_resend_due()`, called from `peer_connection.c`'s loop): upstream sent each DATA
+  chunk once, and a lost one left the browser waiting on its TSN for ever. Each chunk is now
+  kept until a SACK acknowledges it (its cumulative TSN or a gap block), and sent again after
+  300 ms, then twice as long each time, up to 2 s.
 - **Lite pairing**, for the puck's one-QR-code pairing: `peer_connection_start_lite()` in
   `peer_connection.c` and `.h` makes our ICE credentials and certificate and returns them
   with our address, for the other side to build our answer from. `Agent.lite` in `agent.c`

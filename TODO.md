@@ -175,10 +175,10 @@ which messages it needs.
 - **Quicker still.** What a frame spends now: the grid and lines 7 to 27 ms, the fill
   13 ms (the PSRAM's speed), the stars 9 ms, labels 5 to 8 ms. To try: fewer grid points,
   a bigger data cache if internal RAM allows.
-- **Resend lost messages from the puck.** libpeer's SCTP never resends what the puck sends,
-  so on a weak signal a command (a tap, a step) can be lost and the tap does nothing. Keep
-  unacknowledged DATA chunks on the control channel and resend them until the SACK covers
-  them.
+- **Resend lost messages from the puck.** *Done 2026-11-21, tested on the board with every
+  10th chunk held back (`SCTP_TEST_DROP_SENT_EVERY`): each was resent once and acknowledged.*
+  Every DATA chunk the puck sends is kept until a SACK covers it, and resent after 300 ms,
+  then twice as long each time, up to 2 s (`components/libpeer/README.md`).
 - **The QR code's slow heartbeat.** *Done 2026-11-21, tested; slowed to 6 s.* While the
   QR code shows, the screen's brightness swells from dim (50 of 255) to full and back every
   3 s, so a phone camera dazzled by the white AMOLED gets a darker moment to read it
