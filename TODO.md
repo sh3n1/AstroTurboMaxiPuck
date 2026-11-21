@@ -26,12 +26,14 @@ task only depends on tasks above it. "App" marks work in the app's repository
    transfer (kept in flash by its SHA-256 `id`), and `objects` for what moves. The data
    licences allow it: the catalogue reaches the puck only over the link, never in the
    firmware, and carries the app's credits.
-4. **Ask: the phone's screen while linked to the puck.** Today the phone goes into finder
-   mode (no buttons), as for two phones. The puck mirrors the phone's map, so the phone may
-   need its normal map, or a simpler one.
-5. **App sends the view** (App): when linked to the puck, send `view` (rotation, field of
-   view, Alt, Az, distance and direction to the target) at about 30 Hz on its own
-   unreliable channel, and `targetInfo` (the target's name) on every change. Depends on 3, 4.
+4. **The phone's screen while linked to the puck.** *Decided and written 2026-11-21, to
+   test with the puck.* The phone works as usual, with no special view and no finder mode:
+   the puck is only a remote. The puck's link is now its own (`puck-link.service.ts` in the
+   app), apart from Two phones, so a screen phone of two devices can have both. Until task
+   5 it sends a JSON `pose` on the `view` channel, which the test firmware shows.
+5. **App sends the view** (App, `puck-link.service.ts`): when linked to the puck, send the
+   binary `view` of `docs/puck.md` at about 30 Hz on its own unreliable channel, and
+   `targetInfo` (the target's name) on every change. Depends on 3, 4.
 6. **Puck reads the view**: parse `view` and `targetInfo` in `main/link.c`, replacing the
    test's text search, and hand them to the screen through a small shared state, safe
    between core 0 (link) and core 1 (drawing). Depends on 3, 5.
@@ -126,8 +128,8 @@ which messages it needs.
   workaround in `CMakeLists.txt` can go.
 - **Weak Wi-Fi signal** (−91 dBm on the first test): measure the link near the router; the
   worst round trip was 444 ms.
-- **App: split `remote.service.ts`** (over 600 lines, the app's limit is about 500), for
-  example the puck's part into its own file.
+- **App: split `remote.service.ts`** (about 590 lines, the app's limit is about 500). The
+  puck's part is already out, in `puck-link.service.ts`.
 - **App: end-to-end test** for pairing with the puck, faking the puck's side.
 - **Faster full builds on Windows**: Defender exclusions for `C:\Espressif`, `C:\esp` and
   `build/` (the user's choice).
