@@ -24,6 +24,7 @@
 #define PUCK_VIEW_FLAG_MIRROR_X 0x01
 #define PUCK_VIEW_FLAG_MIRROR_Y 0x02
 #define PUCK_VIEW_FLAG_EYEPIECE 0x04
+#define PUCK_VIEW_FLAG_RING 0x08     // the sky map shows the eyepiece's field as its one ring
 
 typedef struct {
     uint8_t type;            // PUCK_VIEW_TYPE

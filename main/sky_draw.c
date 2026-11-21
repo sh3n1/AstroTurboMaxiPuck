@@ -48,6 +48,11 @@ static const uint32_t STAR_TINTS[] = {0xB9D0FF, 0xF4F6FF, 0xFFF3D6, 0xFFD2A1, 0x
 // The catalogue's layout (docs/puck.md, "Format").
 #define SECTION_STARS 1
 #define SECTION_LINES 2
+// The faint stars, for the eyepiece view: sorted by declination band, then right ascension,
+// read straight from flash where the view looks (docs/puck.md, section 7).
+#define SECTION_FAINT 7
+#define FAINT_BAND_DEG 2
+#define FAINT_BANDS (180 / FAINT_BAND_DEG)
 #define STAR_RECORD_BYTES 12
 #define LINE_RECORD_BYTES 16
 
@@ -72,11 +77,25 @@ static size_t star_count;
 static segment_t *segments;
 static size_t segment_count;
 static char loaded_id[CATALOG_ID_CHARS + 1];
+// Where each faint star band starts among the faint stars, and the end (FAINT_BANDS + 1).
+static uint32_t faint_band_first[FAINT_BANDS + 1];
+static uint32_t faint_count;
 
 // The Moon and planets this frame: their discs here, their labels in sky_objects.c.
 static moving_object_t moving[MOVING_MAX];
 static size_t moving_count;
 static float moving_sun[3]; // the Sun's J2000 vector, which lit sides face
+
+// ---- The layer ----
+
+void sky_layer_step(lv_layer_t *layer)
+{
+    static unsigned queued;
+    if (++queued < SKY_LAYER_BATCH) return;
+    queued = 0;
+    lv_canvas_finish_layer(canvas, layer);
+    lv_canvas_init_layer(canvas, layer);
+}
 
 // ---- Pixels ----
 
@@ -103,8 +122,11 @@ static void blend(uint16_t *pixel, uint32_t rgb, float alpha)
 
 static void fill(uint32_t rgb)
 {
-    uint16_t c = rgb565(rgb);
-    for (size_t i = 0; i < SIZE_PX * SIZE_PX; i++) pixels[i] = c;
+    // Two pixels a write: the buffer is in PSRAM, where each write costs.
+    uint32_t two = rgb565(rgb) * 0x00010001u;
+    uint32_t *p = (uint32_t *)pixels;
+    for (size_t i = 0; i < SIZE_PX * SIZE_PX / 2; i++) p[i] = two;
+    if ((SIZE_PX * SIZE_PX) & 1) pixels[SIZE_PX * SIZE_PX - 1] = (uint16_t)two;
 }
 
 // A round dot with a soft edge, centred at (x, y).
@@ -183,10 +205,23 @@ static void load_catalog(void)
         }
         segment_count = n;
     }
+    // The faint stars stay in flash: only where each band starts is worked out here.
+    faint_count = 0;
+    p = sky_find_section(data, bytes, SECTION_FAINT, &n, NULL);
+    if (p) {
+        int band = 0;
+        for (uint32_t i = 0; i < n; i++) {
+            int b = (int)((sky_read_f32(p + i * STAR_RECORD_BYTES + 4) + 90) / FAINT_BAND_DEG);
+            if (b >= FAINT_BANDS) b = FAINT_BANDS - 1;
+            while (band <= b) faint_band_first[band++] = i;
+        }
+        while (band <= FAINT_BANDS) faint_band_first[band++] = n;
+        faint_count = n;
+    }
     sky_objects_load(data, bytes);
     strcpy(loaded_id, id);
-    ESP_LOGI(TAG, "Catalogue %s: %u stars, %u line segments", id, (unsigned)star_count,
-             (unsigned)segment_count);
+    ESP_LOGI(TAG, "Catalogue %s: %u stars, %u faint stars, %u line segments", id, (unsigned)star_count,
+             (unsigned)faint_count, (unsigned)segment_count);
 }
 
 // ---- Drawing ----
@@ -209,6 +244,7 @@ static void draw_altaz_curve(lv_layer_t *layer, lv_draw_line_dsc_t *line, const 
             line->p2.x = x;
             line->p2.y = y;
             lv_draw_line(layer, line);
+            sky_layer_step(layer);
         }
         last_x = x;
         last_y = y;
@@ -251,6 +287,26 @@ static void draw_eyepiece_mask(const sky_frame_t *f, float field_deg, bool night
     }
 }
 
+// The eyepiece's guide (the app's drawEyepieceGuide): chevrons just outside the circle,
+// towards a target that isn't in it. The app turns them with the view but doesn't mirror
+// them as the image is, so the mirroring in targetDirDeg is undone.
+static void draw_eyepiece_guide(const sky_frame_t *f, float field_deg, bool night)
+{
+    const puck_view_msg_t *v = f->view;
+    if (field_deg <= 0 || isnan(v->target_dist_deg) || isnan(v->target_dir_deg)) return;
+    if (v->target_dist_deg < field_deg / 2) return; // in view
+    float dir = v->target_dir_deg;
+    if (v->flags & PUCK_VIEW_FLAG_MIRROR_Y) dir = 180 - dir;
+    if (v->flags & PUCK_VIEW_FLAG_MIRROR_X) dir = -dir;
+    float angle = dir * SKY_DEG_TO_RAD;
+    float radius = sky_radius_px(f, field_deg) + 8 * STAR_SCALE;
+    lv_layer_t layer;
+    lv_canvas_init_layer(canvas, &layer);
+    sky_draw_chevrons(&layer, SKY_CENTRE_PX + sinf(angle) * radius, SKY_CENTRE_PX - cosf(angle) * radius, angle,
+                      v->target_dist_deg, night);
+    lv_canvas_finish_layer(canvas, &layer);
+}
+
 static void draw_lines(lv_layer_t *layer, const sky_frame_t *f, bool night)
 {
     lv_draw_line_dsc_t line;
@@ -277,24 +333,108 @@ static void draw_lines(lv_layer_t *layer, const sky_frame_t *f, bool night)
         line.p2.x = bx;
         line.p2.y = by;
         lv_draw_line(layer, &line);
+        sky_layer_step(layer);
     }
+}
+
+// One star drawn: its size, tint and opacity as the app's (drawStars).
+static void draw_star(const sky_frame_t *f, const float v[3], float mag, uint8_t tint, bool night)
+{
+    float x, y;
+    bool below;
+    if (sky_far_off(f, v) || !sky_project(f, v, &x, &y, &below)) return;
+    if (x < -8 || y < -8 || x > SIZE_PX + 8 || y > SIZE_PX + 8) return;
+    float radius = fmaxf(0.8f, 3.4f - mag * 0.42f) * STAR_SCALE;
+    // Faint stars fade as well as shrink.
+    float alpha = fminf(1, fmaxf(0.55f, 1.15f - floorf(mag) * 0.1f));
+    if (below && f->fade_below) alpha *= SKY_BELOW_HORIZON_OPACITY;
+    draw_disc(x, y, radius, sky_for_night(STAR_TINTS[tint < TINT_COUNT ? tint : 1], night), alpha);
 }
 
 static void draw_stars(const sky_frame_t *f, bool night)
 {
     // Brightest first, so drawing stops at the limit, as the app's map does.
     for (size_t i = 0; i < star_count; i++) {
-        const star_t *s = &stars[i];
-        if (s->mag > f->view->star_limit_mag) break;
-        float x, y;
-        bool below;
-        if (sky_far_off(f, s->v) || !sky_project(f, s->v, &x, &y, &below)) continue;
-        if (x < -8 || y < -8 || x > SIZE_PX + 8 || y > SIZE_PX + 8) continue;
-        float radius = fmaxf(0.8f, 3.4f - s->mag * 0.42f) * STAR_SCALE;
-        // Faint stars fade as well as shrink.
-        float alpha = fminf(1, fmaxf(0.55f, 1.15f - floorf(s->mag) * 0.1f));
-        if (below && f->fade_below) alpha *= SKY_BELOW_HORIZON_OPACITY;
-        draw_disc(x, y, radius, sky_for_night(STAR_TINTS[s->tint], night), alpha);
+        const star_t *star = &stars[i];
+        if (star->mag > f->view->star_limit_mag) break;
+        draw_star(f, star->v, star->mag, star->tint, night);
+    }
+}
+
+// The first faint star in [first, end) whose right ascension is at least ra (they are sorted).
+static uint32_t faint_first_from(const uint8_t *records, uint32_t first, uint32_t end, float ra)
+{
+    while (first < end) {
+        uint32_t mid = first + (end - first) / 2;
+        if (sky_read_f32(records + mid * STAR_RECORD_BYTES) < ra) {
+            first = mid + 1;
+        } else {
+            end = mid;
+        }
+    }
+    return first;
+}
+
+// The faint stars where the view looks, down to its limit: only the bands and right
+// ascensions near its centre are read, as the app's starsNear does.
+static void draw_faint_stars(const sky_frame_t *f, bool night)
+{
+    size_t bytes;
+    const uint8_t *data = catalog_data(&bytes); // NULL while a new catalogue is written
+    uint32_t n;
+    const uint8_t *records = data && faint_count ? sky_find_section(data, bytes, SECTION_FAINT, &n, NULL) : NULL;
+    if (!records || n != faint_count) return;
+
+    // The view's centre in J2000: the view's forward turned back.
+    const float *q = f->sky_then_view;
+    const float back[4] = {q[0], -q[1], -q[2], -q[3]};
+    const float forward[3] = {0, 0, -1};
+    float c[3];
+    sky_rotate(back, forward, c);
+    float dec_c = asinf(fmaxf(-1, fminf(1, c[2]))) * SKY_RAD_TO_DEG;
+    float ra_c = atan2f(c[1], c[0]) * SKY_RAD_TO_DEG;
+    if (ra_c < 0) ra_c += 360;
+    float radius = f->view->fov_deg / 2 + 1; // the round screen, and a margin for refraction
+
+    int b0 = (int)((dec_c - radius + 90) / FAINT_BAND_DEG), b1 = (int)((dec_c + radius + 90) / FAINT_BAND_DEG);
+    if (b0 < 0) b0 = 0;
+    if (b1 >= FAINT_BANDS) b1 = FAINT_BANDS - 1;
+    int16_t limit = (int16_t)(f->view->star_limit_mag * 100);
+    for (int b = b0; b <= b1; b++) {
+        // Lines of right ascension crowd together towards the poles: cover more of them there.
+        float low = -90.0f + b * FAINT_BAND_DEG, high = low + FAINT_BAND_DEG;
+        float widest = fminf(89.9f, fmaxf(fabsf(low), fabsf(high)));
+        float ra_radius = fabsf(dec_c) + radius >= 89.9f ? 180 : fminf(180, radius / cosf(widest * SKY_DEG_TO_RAD));
+        // One right ascension range, or two where it wraps past 0°.
+        float ranges[2][2];
+        int range_count = 1;
+        if (ra_radius >= 180) {
+            ranges[0][0] = 0;
+            ranges[0][1] = 360;
+        } else if (ra_c - ra_radius < 0 || ra_c + ra_radius > 360) {
+            ranges[0][0] = fmodf(ra_c - ra_radius + 360, 360);
+            ranges[0][1] = 360;
+            ranges[1][0] = 0;
+            ranges[1][1] = fmodf(ra_c + ra_radius, 360);
+            range_count = 2;
+        } else {
+            ranges[0][0] = ra_c - ra_radius;
+            ranges[0][1] = ra_c + ra_radius;
+        }
+        for (int r = 0; r < range_count; r++) {
+            uint32_t end = faint_band_first[b + 1];
+            for (uint32_t i = faint_first_from(records, faint_band_first[b], end, ranges[r][0]); i < end; i++) {
+                const uint8_t *rec = records + i * STAR_RECORD_BYTES;
+                float ra = sky_read_f32(rec);
+                if (ra > ranges[r][1]) break;
+                int16_t mag100;
+                memcpy(&mag100, rec + 8, sizeof(mag100));
+                if (mag100 > limit) continue;
+                float v[3];
+                sky_radec_vector(ra, sky_read_f32(rec + 4), v);
+                draw_star(f, v, mag100 / 100.0f, rec[10], night);
+            }
+        }
     }
 }
 
@@ -361,12 +501,27 @@ void sky_draw_clear(bool night)
     lv_obj_invalidate(canvas);
 }
 
+// How long each step of a frame takes, on average, logged every 100 frames: to see where
+// the time goes (at 30 views a second there are 33 ms for it all).
+enum { STEP_FILL, STEP_LINES, STEP_STARS, STEP_MOVING, STEP_TOP, STEP_COUNT };
+static const char *STEP_NAMES[STEP_COUNT] = {"fill", "grid+lines", "stars", "moon+planets", "objects+labels"};
+static int64_t step_us[STEP_COUNT];
+
+static int64_t step_done(int step, int64_t since)
+{
+    int64_t now = esp_timer_get_time();
+    step_us[step] += now - since;
+    return now;
+}
+
 void sky_draw_frame(const puck_view_msg_t *view, bool night, float eyepiece_field_deg)
 {
     if (!canvas) return;
     load_catalog();
     int64_t started = esp_timer_get_time();
+    int64_t t = started;
     fill(sky_for_night(SKY_COLOR_SKY, night));
+    t = step_done(STEP_FILL, t);
     if (view->fov_deg > 0 && view->fov_deg < 360) {
         sky_frame_t f = sky_frame(view);
         moving_count = moving_get(moving, moving_sun);
@@ -378,21 +533,35 @@ void sky_draw_frame(const puck_view_msg_t *view, bool night, float eyepiece_fiel
             draw_lines(&layer, &f, night);
             lv_canvas_finish_layer(canvas, &layer);
         }
+        t = step_done(STEP_LINES, t);
         draw_stars(&f, night);
+        // The eyepiece view shows the faint stars too, as the app's.
+        if (!f.fade_below) draw_faint_stars(&f, night);
+        t = step_done(STEP_STARS, t);
         draw_moving(&f, night);
-        if (!f.fade_below) draw_eyepiece_mask(&f, eyepiece_field_deg, night);
+        t = step_done(STEP_MOVING, t);
         lv_canvas_init_layer(canvas, &layer);
         sky_objects_draw(&layer, &f, night, moving, moving_count);
         lv_canvas_finish_layer(canvas, &layer);
+        // The eyepiece view: black outside its circle, over everything, as the app draws it
+        // last, then the guide to a target outside it.
+        if (!f.fade_below) {
+            draw_eyepiece_mask(&f, eyepiece_field_deg, night);
+            draw_eyepiece_guide(&f, eyepiece_field_deg, night);
+        }
+        t = step_done(STEP_TOP, t);
     }
     lv_obj_invalidate(canvas);
-    // How long drawing takes, now and then: at 30 views a second there are 33 ms for it all.
     static unsigned frames;
     static int64_t total_us;
     total_us += esp_timer_get_time() - started;
-    if (++frames == 300) {
-        ESP_LOGI(TAG, "Drawing the sky: %u us a frame", (unsigned)(total_us / frames));
+    if (++frames == 100) {
+        ESP_LOGI(TAG, "Drawing the sky: %u us a frame: %s %u, %s %u, %s %u, %s %u, %s %u",
+                 (unsigned)(total_us / frames), STEP_NAMES[0], (unsigned)(step_us[0] / frames), STEP_NAMES[1],
+                 (unsigned)(step_us[1] / frames), STEP_NAMES[2], (unsigned)(step_us[2] / frames), STEP_NAMES[3],
+                 (unsigned)(step_us[3] / frames), STEP_NAMES[4], (unsigned)(step_us[4] / frames));
         frames = 0;
         total_us = 0;
+        memset(step_us, 0, sizeof(step_us));
     }
 }

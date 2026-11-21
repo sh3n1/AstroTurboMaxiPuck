@@ -15,12 +15,19 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
+# The Wi-Fi and lwIP buffers in PSRAM: kept in internal RAM, a burst of incoming packets
+# (the catalogue) left the puck with 14 KB of it, and the link stalled.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
 # Logs over the board's USB-C port (the ESP32-S3's built-in USB Serial/JTAG)
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
 # 1 ms tick, smoother timing for drawing later
 CONFIG_FREERTOS_HZ=1000
+
+# Room for a burst of incoming packets (the catalogue's parts) while the link task is busy:
+# lwIP's default of 6 dropped most of each burst.
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
 
 # Big text for reading at arm's length
 CONFIG_LV_FONT_MONTSERRAT_28=y

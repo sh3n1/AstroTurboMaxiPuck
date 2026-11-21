@@ -557,6 +557,20 @@ const char* peer_connection_create_answer(PeerConnection* pc) {
 }
 
 // AstroTurboMaxiPuck: lite pairing, see peer_connection.h.
+void peer_connection_sctp_stats(PeerConnection* pc, uint32_t* data_in, uint32_t* sacks_in, uint32_t* last_sack_cum,
+                                uint32_t* next_tsn, uint32_t* heartbeats_in, uint32_t* write_errors) {
+  *data_in = pc->sctp.stats.data_in;
+  *sacks_in = pc->sctp.stats.sacks_in;
+  *last_sack_cum = pc->sctp.stats.last_sack_cum;
+  *next_tsn = pc->sctp.tsn;
+  *heartbeats_in = pc->sctp.stats.heartbeats_in;
+  *write_errors = pc->sctp.stats.write_errors;
+}
+
+int peer_connection_lite_peer_found(PeerConnection* pc) {
+  return pc->agent.selected_pair != NULL;
+}
+
 int peer_connection_start_lite(PeerConnection* pc, PeerLiteInfo* info) {
   // As for an offer: DTLS server, fresh ICE credentials, the host address gathered.
   peer_connection_set_local_description(pc, NULL, SDP_TYPE_OFFER);

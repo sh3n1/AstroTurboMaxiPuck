@@ -54,6 +54,13 @@ int addr_to_string(const Address* addr, char* buf, size_t len) {
 }
 
 int addr_equal(const Address* a, const Address* b) {
-  // TODO
-  return 1;
+  // AstroTurboMaxiPuck: upstream left this as a TODO that always said yes. The same family,
+  // address and port.
+  if (a->family != b->family || a->port != b->port) {
+    return 0;
+  }
+  if (a->family == AF_INET6) {
+    return memcmp(&a->sin6.sin6_addr, &b->sin6.sin6_addr, sizeof(a->sin6.sin6_addr)) == 0;
+  }
+  return a->sin.sin_addr.s_addr == b->sin.sin_addr.s_addr;
 }

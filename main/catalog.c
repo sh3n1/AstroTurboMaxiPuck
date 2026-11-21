@@ -271,6 +271,13 @@ void catalog_cancel(void)
     set_state(CATALOG_IDLE, NULL);
 }
 
+void catalog_fail_receiving(const char *reason)
+{
+    if (catalog_state(NULL, NULL) != CATALOG_RECEIVING) return;
+    free_incoming();
+    set_state(CATALOG_FAILED, reason);
+}
+
 const uint8_t *catalog_data(size_t *bytes)
 {
     if (catalog_state(NULL, NULL) == CATALOG_WRITING) return NULL; // being replaced

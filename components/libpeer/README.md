@@ -38,6 +38,22 @@ Every change is marked with an `AstroTurboMaxiPuck:` comment.
 - `utils.c`: on the ESP32, `utils_random_string` (the ICE credentials) takes its characters
   from the hardware random generator (`esp_random`). Upstream seeded `rand()` from the
   clock, which a puck with no real clock makes predictable.
+- **Lite pairing follows the browser's nomination** (`agent.c`, `stun.c`, `stun.h`): the
+  browser checks from every address it has, mobile data or a VPN among them, and the first
+  check may come from one our answers can't reach. A valid check with USE-CANDIDATE from
+  another address now moves the selected pair there. `stun.c` keeps USE-CANDIDATE
+  (`StunMessage.use_candidate`), and `peer_connection_lite_peer_found()` lets the
+  application give up when a heard peer never connects.
+- `address.c`: `addr_equal` was an unfinished TODO that always returned true; it now
+  compares the family, address and port.
+- `sctp.c`, `sctp.h`, **a real receive window, and chunks kept when early**: upstream's SACK
+  advertised a window of one packet (1300 bytes), so a browser sent one packet at a time,
+  and a lost one stopped everything (views too) until its resend timeout, seconds later,
+  which dropped the link; a big transfer (the catalogue) never got through. Now the window
+  is 64 000 bytes, the SACK's mask covers 64 TSNs, and a chunk of an ordered channel that
+  arrives after a gap is kept (in PSRAM) and taken in order once the gap is filled, so only
+  what was lost is resent. Messages are passed on as they are taken, in TSN order, so a
+  channel's messages keep their order; the SACK is built afterwards.
 - `sctp.c` test hook `SCTP_TEST_DROP_EVERY` (set in `CMakeLists.txt`, 0 is off): acts as if
   every Nth incoming DATA chunk was lost, to test resends and FORWARD-TSN.
 - **Lite pairing**, for the puck's one-QR-code pairing: `peer_connection_start_lite()` in

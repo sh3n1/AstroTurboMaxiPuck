@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -38,6 +39,10 @@ static const char *TAG = "link";
 #define PWD_CHARS 24
 // Once the data channel is open, the app must send its secret within this time.
 #define AUTH_TIMEOUT_US (5 * 1000 * 1000)
+// Once the app has been heard, the data channel must open within this time, or pairing
+// starts again with a new QR code: a handshake with an address that doesn't answer never
+// ends on its own.
+#define CONNECT_TIMEOUT_US (20 * 1000 * 1000)
 // The biggest control message read: `objects`, the Moon and planets, is the biggest, at a
 // few KB. Read into one static buffer: messages only come in the link task.
 #define CONTROL_MAX_BYTES 8192
@@ -45,9 +50,17 @@ static const char *TAG = "link";
 // sends at least one message a second, and silence for 4 s means the link is lost.
 #define PING_INTERVAL_US (1000 * 1000)
 #define SILENCE_LIMIT_US (4 * 1000 * 1000)
+// While a catalogue comes: catalogAck is said again this often, and with no new part for
+// this long the transfer is given up.
+#define CATALOG_ACK_REPEAT_US (500 * 1000)
+#define CATALOG_STALL_US (15 * 1000 * 1000)
 // Commands waiting for the link task to send them, and the biggest one.
 #define COMMAND_QUEUE_LENGTH 8
 #define COMMAND_MAX_BYTES 96
+// Packets read at most each time round the link task's loop, before it rests a millisecond.
+// One a millisecond was too few: the catalogue comes in bursts of dozens of packets, and the
+// rest were dropped and resent seconds later, holding up everything behind them.
+#define PACKETS_PER_ROUND 16
 // The link task runs on core 0, with the Wi-Fi, leaving core 1 to drawing.
 #define LINK_TASK_CORE 0
 #define LINK_TASK_STACK 16384
@@ -58,6 +71,7 @@ static uint8_t secret[SECRET_BYTES];
 static char secret_text[32];          // the secret in base64url, as the app sends it
 static bool authenticated;
 static int64_t channel_open_time;     // 0 until the data channel opens
+static int64_t peer_found_time;       // 0 until the app is first heard
 static volatile bool restart_needed;  // set in libpeer's callbacks, acted on by the task
 static QueueHandle_t commands;        // from the screen, sent by the link task
 static int64_t last_heard_us;         // when the app's last message came, once paired
@@ -188,11 +202,38 @@ static void on_catalog(const char *message, size_t length)
     }
 }
 
-// Answers the app once a catalogue is kept or has failed.
+// Answers the app as a catalogue comes in: how much has come, so it sends the next parts
+// (catalogAck), and once it is kept or has failed.
 static void answer_catalog(void)
 {
     char text[96];
-    switch (catalog_state(NULL, NULL)) {
+    static uint32_t acked;
+    static int64_t acked_at, progress_at;
+    uint32_t received = 0;
+    catalog_state_t now = catalog_state(&received, NULL);
+    int64_t time_now = esp_timer_get_time();
+    if (now == CATALOG_RECEIVING || now == CATALOG_WRITING) {
+        if (received != acked) progress_at = time_now;
+        // Parts stopped coming: give up, so the app starts again (catalogFailed).
+        if (now == CATALOG_RECEIVING && progress_at && time_now - progress_at > CATALOG_STALL_US) {
+            ESP_LOGW(TAG, "The catalogue stopped coming at %u bytes: giving up", (unsigned)received);
+            catalog_fail_receiving("stalled");
+            progress_at = 0;
+            return;
+        }
+        // Said again every so often even with nothing new: what we send is never resent, and
+        // a lost catalogAck would leave the app waiting for it, and us for the next parts.
+        if (received != acked || time_now - acked_at > CATALOG_ACK_REPEAT_US) {
+            acked = received;
+            acked_at = time_now;
+            snprintf(text, sizeof(text), "{\"t\":\"catalogAck\",\"bytes\":%u}", (unsigned)received);
+            send_control(text);
+        }
+        return;
+    }
+    acked = 0;
+    progress_at = 0;
+    switch (now) {
     case CATALOG_DONE:
         snprintf(text, sizeof(text), "{\"t\":\"catalogDone\",\"id\":\"%s\"}", catalog_kept_id());
         break;
@@ -365,6 +406,7 @@ static bool start_pairing(bool after_loss)
     view_state_clear();
     moving_clear();
     channel_open_time = 0;
+    peer_found_time = 0;
     restart_needed = false;
 
     char qr_text[160];
@@ -383,7 +425,9 @@ static void link_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
     for (;;) {
-        peer_connection_loop(connection);
+        // Every packet waiting, up to a limit: the loop returns the size of the one it read.
+        for (int i = 0; i < PACKETS_PER_ROUND && peer_connection_loop(connection) > 0; i++) {
+        }
         if (hello_needed && authenticated) {
             hello_needed = false;
             send_hello();
@@ -391,12 +435,34 @@ static void link_task(void *arg)
         send_commands();
         answer_catalog();
 
-        bool auth_late = channel_open_time && !authenticated &&
-                         esp_timer_get_time() - channel_open_time > AUTH_TIMEOUT_US;
+        int64_t now = esp_timer_get_time();
+        // Memory, now and then, to catch the internal RAM running short (the Wi-Fi and lwIP
+        // need it, and fail to send with "Not enough space" without).
+        static int64_t memory_logged;
+        if (now - memory_logged > 5 * 1000 * 1000) {
+            memory_logged = now;
+            ESP_LOGI(TAG, "Free internal %u KB (lowest %u KB, largest block %u KB), PSRAM %u KB",
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                     (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                     (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+            if (authenticated) {
+                uint32_t data_in, sacks_in, sack_cum, next_tsn, heartbeats, write_errors;
+                peer_connection_sctp_stats(connection, &data_in, &sacks_in, &sack_cum, &next_tsn, &heartbeats,
+                                           &write_errors);
+                ESP_LOGI(TAG, "SCTP: %u chunks in, %u SACKs in (acked to %u, our next %u), %u heartbeats, "
+                         "%u write errors", (unsigned)data_in, (unsigned)sacks_in, (unsigned)sack_cum,
+                         (unsigned)next_tsn, (unsigned)heartbeats, (unsigned)write_errors);
+            }
+        }
+        bool auth_late = channel_open_time && !authenticated && now - channel_open_time > AUTH_TIMEOUT_US;
         if (auth_late) ESP_LOGW(TAG, "No secret in time: dropping the link");
+        if (!peer_found_time && peer_connection_lite_peer_found(connection)) peer_found_time = now;
+        bool connect_late = peer_found_time && !channel_open_time && now - peer_found_time > CONNECT_TIMEOUT_US;
+        if (connect_late) ESP_LOGW(TAG, "The app was heard, but the link didn't follow: starting again");
         bool silent = link_silent();
         if (silent) ESP_LOGW(TAG, "Nothing from the app for 4 s: the link is lost");
-        if (restart_needed || auth_late || silent) {
+        if (restart_needed || auth_late || connect_late || silent) {
             // Paired until now: the link is lost, rather than refused.
             bool after_loss = authenticated;
             while (!start_pairing(after_loss)) {

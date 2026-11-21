@@ -362,9 +362,11 @@ int agent_send_binding_request(Agent* agent) {
   return ret;
 }
 
-// AstroTurboMaxiPuck: lite pairing (see Agent.lite). Takes the other side from its first
-// valid binding request: its ICE username from USERNAME ("ours:theirs") and its address from
-// where the request came from, as the one selected pair.
+// AstroTurboMaxiPuck: lite pairing (see Agent.lite). Takes the other side from a valid
+// binding request: its ICE username from USERNAME ("ours:theirs") and its address from
+// where the request came from, as the one selected pair. First from the first valid request,
+// then from any that carries USE-CANDIDATE from another address: the browser checks from
+// every address it has (mobile data, a VPN...), but nominates the one our answers reached.
 static void agent_accept_lite_peer(Agent* agent, StunMessage* stun_msg, Address* addr) {
   const char* colon = strchr(stun_msg->username, ':');
   if (!colon || agent->local_candidates_count == 0) {
@@ -405,6 +407,10 @@ void agent_process_stun_request(Agent* agent, StunMessage* stun_msg, Address* ad
       }
       if (stun_msg_is_valid(stun_msg->buf, stun_msg->size, agent->local_upwd) == 0) {
         if (agent->lite && !agent->selected_pair) {
+          agent_accept_lite_peer(agent, stun_msg, addr);
+        } else if (agent->lite && stun_msg->use_candidate &&
+                   !addr_equal(&agent->selected_pair->remote->addr, addr)) {
+          LOGI("lite pairing: the other side nominates another address");
           agent_accept_lite_peer(agent, stun_msg, addr);
         }
         header = (StunHeader*)stun_msg->buf;

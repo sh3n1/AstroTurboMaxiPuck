@@ -145,6 +145,16 @@ typedef struct PeerLiteInfo {
 int peer_connection_start_lite(PeerConnection* pc, PeerLiteInfo* info);
 
 /**
+ * AstroTurboMaxiPuck: in lite pairing, whether the other side has been heard (a valid
+ * binding request), so the application can give up if the link doesn't follow in time.
+ */
+int peer_connection_lite_peer_found(PeerConnection* pc);
+
+/** AstroTurboMaxiPuck: the SCTP counters (sctp.h, SctpStats) and our next TSN. */
+void peer_connection_sctp_stats(PeerConnection* pc, uint32_t* data_in, uint32_t* sacks_in, uint32_t* last_sack_cum,
+                                uint32_t* next_tsn, uint32_t* heartbeats_in, uint32_t* write_errors);
+
+/**
  * @brief register callback function to handle packet loss from RTCP receiver report
  * @param[in] peer connection
  * @param[in] callback function void (*cb)(float fraction_loss, uint32_t total_loss, void *userdata)

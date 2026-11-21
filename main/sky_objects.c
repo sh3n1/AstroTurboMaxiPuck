@@ -28,6 +28,16 @@ static const char *TAG = "sky";
 #define COLOR_OUTLINE 0x05070F
 // The selected target's crosshair: the green the rings turn on target (THEME.success).
 #define COLOR_ON_TARGET 0x6FCF9F
+// The guidance chevrons (THEME.guidance), and their shape and spacing (draw-targets.ts,
+// reticle.ts).
+#define COLOR_GUIDE 0xA9CBFF
+#define CHEVRON_HEIGHT_PX (8 * PX_SCALE)
+#define CHEVRON_HALF_WIDTH_PX (11 * PX_SCALE)
+#define CHEVRON_WIDTH_PX (3.5f * PX_SCALE)
+#define CHEVRON_MIN_SPACING_PX 3.0f
+#define CHEVRON_MAX_SPACING_PX 18.0f
+#define CHEVRON_SPACING_PX_PER_DEG 0.5f
+static const float CHEVRON_FADE[] = {0.35f, 0.65f, 1.0f};
 
 // Sizes, as the app's (draw-targets.ts), in the puck's pixels: its pixels are smaller than a
 // phone's CSS pixels (see STAR_SCALE in sky_draw.c).
@@ -166,17 +176,21 @@ static bool draw_label(lv_layer_t *layer, const char *text, float x, float y, ui
     label.font = LABEL_FONT;
     label.text = text;
     label.opa = (lv_opa_t)(LV_OPA_COVER * alpha);
-    // The outline: the text a pixel off in each direction, in the sky's colour.
-    label.color = lv_color_hex(COLOR_OUTLINE);
-    static const int8_t around[][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
-    for (size_t i = 0; i < 4; i++) {
-        lv_area_t area = {(int32_t)box.left + around[i][0], (int32_t)box.top + around[i][1],
-                          (int32_t)box.right + around[i][0], (int32_t)box.bottom + around[i][1]};
-        lv_draw_label(layer, &label, &area);
-    }
+    // A dark backing, rounded, so the text stays readable over lines and stars, as the app's
+    // dark outline does. Drawing the text four more times, offset, as an outline, made labels
+    // two thirds of the frame's time.
+    lv_draw_rect_dsc_t back;
+    lv_draw_rect_dsc_init(&back);
+    back.bg_color = lv_color_hex(COLOR_OUTLINE);
+    back.bg_opa = (lv_opa_t)(LV_OPA_60 * alpha);
+    back.radius = 4;
+    lv_area_t back_area = {(int32_t)box.left - 2, (int32_t)box.top, (int32_t)box.right + 2, (int32_t)box.bottom};
+    lv_draw_rect(layer, &back, &back_area);
+    sky_layer_step(layer);
     label.color = lv_color_hex(rgb);
     lv_area_t area = {(int32_t)box.left, (int32_t)box.top, (int32_t)box.right, (int32_t)box.bottom};
     lv_draw_label(layer, &label, &area);
+    sky_layer_step(layer);
     return true;
 }
 
@@ -193,6 +207,7 @@ static void draw_ring(lv_layer_t *layer, float x, float y, float radius, uint32_
     arc.color = lv_color_hex(rgb);
     arc.opa = (lv_opa_t)(LV_OPA_COVER * alpha);
     lv_draw_arc(layer, &arc);
+    sky_layer_step(layer);
 }
 
 // A dashed circle: as many short arcs as fit, up to MAX_DASHES.
@@ -217,6 +232,7 @@ static void draw_dashed_ring(lv_layer_t *layer, float x, float y, float radius, 
         arc.start_angle = i * step;
         arc.end_angle = i * step + step / 2;
         lv_draw_arc(layer, &arc);
+        sky_layer_step(layer);
     }
 }
 
@@ -248,8 +264,41 @@ static void draw_target(lv_layer_t *layer, const sky_frame_t *f, bool night)
             line.p2.x = x + arms[i][0] * (CROSSHAIR_GAP_PX + CROSSHAIR_LENGTH_PX);
             line.p2.y = y + arms[i][1] * (CROSSHAIR_GAP_PX + CROSSHAIR_LENGTH_PX);
             lv_draw_line(layer, &line);
+            sky_layer_step(layer);
         }
     }
+}
+
+void sky_draw_chevrons(lv_layer_t *layer, float x, float y, float angle, float distance_deg, bool night)
+{
+    // Wide gaps mean the target is far away, so move quickly; tight gaps mean slow down.
+    float spacing = fminf(CHEVRON_MAX_SPACING_PX,
+                          fmaxf(CHEVRON_MIN_SPACING_PX, CHEVRON_MIN_SPACING_PX + distance_deg * CHEVRON_SPACING_PX_PER_DEG)) *
+                    PX_SCALE;
+    float s = sinf(angle), c = cosf(angle);
+    // A point at (across, along) in the chevrons' own frame, where along runs outwards.
+    #define CHEVRON_X(across, along) (x + (across) * c + (along) * s)
+    #define CHEVRON_Y(across, along) (y + (across) * s - (along) * c)
+    lv_draw_line_dsc_t line;
+    lv_draw_line_dsc_init(&line);
+    line.color = lv_color_hex(sky_for_night(COLOR_GUIDE, night));
+    line.width = (int32_t)CHEVRON_WIDTH_PX;
+    line.round_start = line.round_end = 1;
+    for (int i = 0; i < 3; i++) {
+        float tip = i * spacing + CHEVRON_HEIGHT_PX; // the tip, this far out
+        float base = tip - CHEVRON_HEIGHT_PX;
+        line.opa = (lv_opa_t)(LV_OPA_COVER * CHEVRON_FADE[i]);
+        for (int side = -1; side <= 1; side += 2) {
+            line.p1.x = CHEVRON_X(side * CHEVRON_HALF_WIDTH_PX, base);
+            line.p1.y = CHEVRON_Y(side * CHEVRON_HALF_WIDTH_PX, base);
+            line.p2.x = CHEVRON_X(0, tip);
+            line.p2.y = CHEVRON_Y(0, tip);
+            lv_draw_line(layer, &line);
+            sky_layer_step(layer);
+        }
+    }
+    #undef CHEVRON_X
+    #undef CHEVRON_Y
 }
 
 // ---- The parts ----
@@ -275,6 +324,7 @@ static void draw_horizon(lv_layer_t *layer, const sky_frame_t *f, bool night)
             line.p2.x = x;
             line.p2.y = y;
             lv_draw_line(layer, &line);
+            sky_layer_step(layer);
         }
         last_x = x;
         last_y = y;
@@ -363,7 +413,7 @@ void sky_objects_draw(lv_layer_t *layer, const sky_frame_t *f, bool night,
                       const moving_object_t *moving, size_t moving_count)
 {
     box_count = 0;
-    if (f->fade_below) draw_horizon(layer, f, night); // the eyepiece view has none
+    draw_horizon(layer, f, night); // in the eyepiece view too, as the app's
     draw_moving_labels(layer, f, night, moving, moving_count);
     draw_catalog_objects(layer, f, night, true);
     draw_catalog_objects(layer, f, night, false);
