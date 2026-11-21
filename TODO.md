@@ -46,8 +46,11 @@ task only depends on tasks above it. "App" marks work in the app's repository
    app (`puck-link.service.ts`, `puck-messages.ts`) does each as its own button would, and
    sends `state` (night, solving), which the puck follows: night palette, dimmed rings while
    solving.
-8. **Losing and finding the link**: the puck notices a silent link (no `view` for 4 s),
-   says so, and shows a new QR code; the app shows "link lost" as for two phones.
+8. **Losing and finding the link.** *Written 2026-11-21, to test on the board.* Each side
+   sends something at least once a second (the app a `view`, or `state` before its map has
+   drawn; the puck `ping`), and takes 4 s of silence as a lost link: the puck shows a new
+   QR code with "Link lost: scan again", the app a "Puck disconnected" toast and "Link
+   lost" on its Remote page. Test: link, then switch the puck off, or close the app.
 
 ## 2. The main screen
 
@@ -72,19 +75,32 @@ night, no grey.
 
 ## 3. The sky map
 
-15. **App sends the catalogue** (App): the stars (and later deep-sky objects and lines) the
-    phone's map uses, in a compact binary form, with a version. The puck keeps it in flash
-    (its own partition) and asks for it only when its version differs. **Ask:** how deep
-    (main stars only, about 200 KB, or the deep stars too, under 1 MB), and how the phone's
-    rectangular map fits the round screen. Depends on 3, 5.
-16. **Puck projects and draws the stars** as the background, behind the reticle: rotate each
-    star by the newest `view`, project, and draw with the app's colours and sizes by
-    magnitude (mirroring `sky-style.ts`), only the stars bright enough for the field of view.
-    Depends on 9, 15.
-17. **Moving objects** (App and puck): the Moon, planets and comets as a small list of
-    J2000 positions, sent on link and every minute or so. Depends on 16.
-18. **The rest of the map**: constellation lines, deep-sky objects, planets, the horizon and
-    labels, added to the catalogue or the moving list. Depends on 17.
+15. **App sends the catalogue.** *Written 2026-11-21, to test on the board.* The app builds
+    it (`puck-catalog.ts`, tested; `puck-catalog.service.ts`): the map's stars to 6.5, the
+    constellation lines and names, the fixed objects with the map's labels and label rules,
+    and the data credits; about 505 KB in 32 parts. After `puckHello` it sends
+    `catalogStart` and the parts on the catalogue channel, unless the puck holds the same
+    `id`. The puck (`main/catalog.c`) collects it in PSRAM, checks the CRC, and a task of
+    its own writes it to the new 2 MB `catalog` partition (`partitions.csv`: the flash needs
+    its partition table written again, which `idf.py flash` does). Test: link, and the log
+    shows "Receiving", "Writing", "kept", then on the next link "current". **Ask:** the
+    faint stars (to magnitude 9, about 1.2 MB more) for the eyepiece view. For now the
+    puck's diameter shows the width of the phone's map (`viewField`). Depends on 3, 5.
+16. **Puck projects and draws the stars.** *Written 2026-11-21, to test on the board.*
+    `main/sky_draw.c`: a full-screen canvas in PSRAM behind everything; each new view
+    turns, refracts and projects the stars (brightest first, to the view's limit) and the
+    constellation lines as the app does, with its tints, sizes, fading below the horizon,
+    and night red. Things to check on the board: the sky matches the phone's, star sizes
+    (`STAR_SCALE`), and whether 30 frames a second keep up. Depends on 9, 15.
+17. **Moving objects.** *Written 2026-11-21, to test on the board.* The app sends
+    `objects` (`puck-objects.ts`, tested): the Moon, planets and bright asteroids with their
+    labels, sizes and phases, once linked and once a minute. The puck reads them
+    (`main/moving.c`, with the JSON readers now in `main/json_read.c`) and draws each as a
+    disc of its size over the stars. Still to do: the Moon's and Venus's phase, turned to the
+    Sun, and the labels (task 18). Depends on 16.
+18. **The rest of the map**: deep-sky objects and their icons, planets, the horizon, the
+    grid, labels and constellation names, from the catalogue (already sent) or the moving
+    list. The constellation lines are drawn already (task 16). Depends on 17.
 
 ## 4. The menu
 
@@ -119,11 +135,9 @@ which messages it needs.
 
 ## Improvements
 
-- **ICE credentials from the hardware random generator.** libpeer seeds them from the clock
-  (`utils_random_string` with `srand(time(NULL))`), and the puck has no real clock, so they
-  are predictable. Someone on the same Wi-Fi could guess them and keep taking the pairing
-  slot (they can't pair without the secret, but they could stop the user from pairing). Use
-  `esp_fill_random`, as the secret does.
+- **ICE credentials from the hardware random generator.** *Done 2026-11-21, to test on
+  the board.* libpeer seeded them from the clock, which the puck doesn't have, so someone on
+  the same Wi-Fi could guess them and keep taking the pairing slot. Now `esp_random`.
 - **Resend lost messages from the puck.** libpeer's SCTP never resends what the puck sends,
   so on a weak signal a command (a tap, a step) can be lost and the tap does nothing. Keep
   unacknowledged DATA chunks on the control channel and resend them until the SACK covers

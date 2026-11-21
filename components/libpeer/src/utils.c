@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef ESP_PLATFORM
+#include "esp_random.h"
+#endif
 #include "mbedtls/md.h"
 #include "mbedtls/version.h"
 #if MBEDTLS_VERSION_NUMBER >= 0x04000000
@@ -18,11 +21,21 @@ void utils_random_string(char* s, const int len) {
       "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
       "abcdefghijklmnopqrstuvwxyz";
 
+#ifdef ESP_PLATFORM
+  // AstroTurboMaxiPuck: from the hardware random generator. Seeded from the clock, as
+  // upstream did, these ICE credentials were predictable on a puck with no real clock: someone
+  // on the same Wi-Fi could guess them and keep taking the pairing slot. The bias of 2^32
+  // modulo 62 is about one part in 70 million.
+  for (i = 0; i < len; ++i) {
+    s[i] = alphanum[esp_random() % (sizeof(alphanum) - 1)];
+  }
+#else
   srand(time(NULL));
 
   for (i = 0; i < len; ++i) {
     s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
   }
+#endif
 
   s[len] = '\0';
 }

@@ -17,18 +17,21 @@ app's "Two phones" mode.
   https://github.com/sh3n1/AstroTurboMaxiSolver. This folder sits inside it, ignored by its
   git, and `.claude/settings.json` gives agents read access to it. Its own `AGENTS.md` has the
   app's rules; the ones that apply here are repeated below.
-- **Current state (2026-11-21):** bring-up of the screen and touch done, tested on the board
-  with ESP-IDF v6.1.1. `main/board.c` starts the screen, touch and LVGL; `main/main.c` logs
-  the chip (16 MB flash, 8 MB PSRAM), shows red, green, blue, then the app's sky colour with
-  the three reticle rings, and logs touches. Colours and touch direction confirmed right. The
-  touch chip is a CST9217 (Waveshare's wiki wrongly says FT3168 in one place). The board shows
-  up as COM3 (the ESP32-S3's own USB). Build steps are in `README.md`, libraries and their
-  licences in `docs/third-party.md`. The battery (AXP2101) waits until the user has one.
-  The puck joins the Wi-Fi (`main/wifi.c`) and a first WebRTC link works (`main/link_test.c`):
-  the puck serves a test page, the phone's browser POSTs its offer, libpeer answers, and the
-  data channel echoes 10 messages a second with none lost (round trip median 37 ms, worst
-  444 ms with a weak −91 dBm signal, 2026-11-21). Next: the one-QR-code pairing, so the app
-  itself (HTTPS, which can't POST to the puck's http address) can link to the puck.
+- **Current state (2026-11-21):** what is done and what is next is in `TODO.md`. In short:
+  - **Tested on the board** (ESP-IDF v6.1.1, COM3, the ESP32-S3's own USB): the screen,
+    touch and LVGL (`main/board.c`; colours and touch direction right; the touch chip is a
+    CST9217, though Waveshare's wiki says FT3168 in one place); the Wi-Fi (`main/wifi.c`);
+    the one-QR-code pairing with the app and libpeer fixes (`main/link.c`,
+    `components/libpeer/README.md`); the binary `view` and `targetInfo` (`main/view_state.c`),
+    shown on a test screen (`main/main.c`) with rings that follow the field of view; and the
+    commands (reticle tap, step, night by long press) with the app's `state`.
+  - **Written, built, not yet tried on the board:** a lost link noticed both ways (`ping`,
+    4 s of silence); the sky catalogue sent by the app and kept in a 2 MB flash partition
+    (`main/catalog.c`, `partitions.csv`); the stars and constellation lines drawn behind the
+    rings (`main/sky_draw.c`); the Moon and planets (`main/moving.c`); ICE credentials from
+    the hardware random generator.
+  - Build steps are in `README.md`, libraries and their licences in `docs/third-party.md`.
+    The battery (AXP2101) waits until the user has one.
 
 ## Decisions taken
 

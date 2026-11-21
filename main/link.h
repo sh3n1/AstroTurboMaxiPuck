@@ -15,8 +15,9 @@
 
 /** What the link tells the screen. Called from the link task: keep short, lock LVGL. */
 typedef struct {
-    /** Show this QR code text for pairing (a new one after every lost or refused link). */
-    void (*show_pairing)(const char *qr_text);
+    /** Show this QR code text for pairing (a new one after every lost or refused link).
+     *  after_loss: a link to the app was there and is lost. */
+    void (*show_pairing)(const char *qr_text, bool after_loss);
     /** A short state to show, such as "Linked". */
     void (*show_state)(const char *text);
 } link_callbacks_t;
