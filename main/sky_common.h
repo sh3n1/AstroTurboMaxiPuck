@@ -17,20 +17,6 @@
 #include "board.h"
 #include "puck_protocol.h"
 
-// ---- Drawing on the sky's canvas ----
-
-#include "lvgl.h"
-
-/**
- * Call after each LVGL draw call on the sky's layer. LVGL queues every line, arc and label
- * as a task until the layer is finished, in its own 64 KB of memory, which a frame's
- * thousand or so would overflow (it did: the puck restarted on the first frame). Every
- * SKY_LAYER_BATCH tasks, this finishes the layer, which draws and frees them, and starts it
- * again (sky_draw.c).
- */
-void sky_layer_step(lv_layer_t *layer);
-#define SKY_LAYER_BATCH 64
-
 // ---- The app's colours (sky-style.ts, theme.ts) ----
 
 #define SKY_COLOR_SKY 0x05070F

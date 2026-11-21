@@ -28,12 +28,15 @@ app's "Two phones" mode.
   - **Also tested on the board (2026-11-21):** a lost link noticed both ways (`ping`, 4 s
     of silence); the sky catalogue (2.1 MB, faint stars included) sent by the app and kept in
     a 4 MB flash partition (`main/catalog.c`); the sky drawn behind the rings as the phone's
-    (`main/sky_draw.c`, `main/sky_objects.c`): stars, lines, grid, horizon, objects, labels,
+    (`main/sky_draw.c`, `main/sky_stars.c`, `main/sky_objects.c`, `main/sky_labels.c`,
+    `main/sky_pixels.c`): stars, lines, grid, horizon, objects, labels,
     the Moon and planets (`main/moving.c`), the eyepiece and ring views; the puck's own zoom
     (`main/zoom.c`); night mode; the QR code's heartbeat. libpeer's SCTP now has a real
     receive window and keeps early packets; the Wi-Fi and lwIP buffers are in PSRAM.
-  - **Not yet good enough:** drawing takes 125 to 175 ms a frame, so the map moves in jumps;
-    and the puck never resends what it sends, which can still drop the link.
+  - **Smooth since 2026-11-21:** 46 to 60 ms a frame, and the view glides between
+    messages (`main/view_glide.c`).
+  - **Not yet good enough:** the puck never resends what it sends, which can still drop
+    the link.
   - Build steps are in `README.md`, libraries and their licences in `docs/third-party.md`.
     The battery (AXP2101) waits until the user has one.
 
