@@ -92,8 +92,12 @@ night, no grey.
     constellation lines as the app does, with its tints, sizes, fading below the horizon,
     and night red. Things to check on the board: the sky matches the phone's, star sizes
     (`STAR_SCALE`), and whether 30 frames a second keep up. Depends on 9, 15.
-17. **Moving objects** (App and puck): the Moon, planets and comets as a small list of
-    J2000 positions, sent on link and every minute or so. Depends on 16.
+17. **Moving objects.** *Written 2026-11-21, to test on the board.* The app sends
+    `objects` (`puck-objects.ts`, tested): the Moon, planets and bright asteroids with their
+    labels, sizes and phases, once linked and once a minute. The puck reads them
+    (`main/moving.c`, with the JSON readers now in `main/json_read.c`) and draws each as a
+    disc of its size over the stars. Still to do: the Moon's and Venus's phase, turned to the
+    Sun, and the labels (task 18). Depends on 16.
 18. **The rest of the map**: deep-sky objects and their icons, planets, the horizon, the
     grid, labels and constellation names, from the catalogue (already sent) or the moving
     list. The constellation lines are drawn already (task 16). Depends on 17.
@@ -131,11 +135,9 @@ which messages it needs.
 
 ## Improvements
 
-- **ICE credentials from the hardware random generator.** libpeer seeds them from the clock
-  (`utils_random_string` with `srand(time(NULL))`), and the puck has no real clock, so they
-  are predictable. Someone on the same Wi-Fi could guess them and keep taking the pairing
-  slot (they can't pair without the secret, but they could stop the user from pairing). Use
-  `esp_fill_random`, as the secret does.
+- **ICE credentials from the hardware random generator.** *Done 2026-11-21, to test on
+  the board.* libpeer seeded them from the clock, which the puck doesn't have, so someone on
+  the same Wi-Fi could guess them and keep taking the pairing slot. Now `esp_random`.
 - **Resend lost messages from the puck.** libpeer's SCTP never resends what the puck sends,
   so on a weak signal a command (a tap, a step) can be lost and the tap does nothing. Keep
   unacknowledged DATA chunks on the control channel and resend them until the SACK covers

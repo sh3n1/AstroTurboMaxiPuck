@@ -17,6 +17,8 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "catalog.h"
+#include "json_read.h"
+#include "moving.h"
 #include "peer.h"
 #include "puck_protocol.h"
 #include "view_state.h"
@@ -34,8 +36,9 @@ static const char *TAG = "link";
 #define PWD_CHARS 24
 // Once the data channel is open, the app must send its secret within this time.
 #define AUTH_TIMEOUT_US (5 * 1000 * 1000)
-// The biggest control message read; control messages are small JSON texts.
-#define CONTROL_MAX_BYTES 512
+// The biggest control message read: `objects`, the Moon and planets, is the biggest, at a
+// few KB. Read into one static buffer: messages only come in the link task.
+#define CONTROL_MAX_BYTES 8192
 // Keeping the link alive (the app's docs/puck.md, "Keeping the link alive"): each side
 // sends at least one message a second, and silence for 4 s means the link is lost.
 #define PING_INTERVAL_US (1000 * 1000)
@@ -106,97 +109,6 @@ static bool make_qr_text(const PeerLiteInfo *info, char *out, size_t out_len)
     return true;
 }
 
-// Writes a code point as UTF-8 into out at *o, if it fits.
-static void put_utf8(unsigned code, char *out, size_t out_len, size_t *o)
-{
-    char bytes[3];
-    size_t n = 0;
-    if (code < 0x80) {
-        bytes[n++] = (char)code;
-    } else if (code < 0x800) {
-        bytes[n++] = (char)(0xC0 | code >> 6);
-        bytes[n++] = (char)(0x80 | (code & 0x3F));
-    } else {
-        bytes[n++] = (char)(0xE0 | code >> 12);
-        bytes[n++] = (char)(0x80 | (code >> 6 & 0x3F));
-        bytes[n++] = (char)(0x80 | (code & 0x3F));
-    }
-    if (*o + n >= out_len) return; // keep whole characters only
-    memcpy(out + *o, bytes, n);
-    *o += n;
-}
-
-// Reads the string after "key": in a JSON text, such as "name":"Crab Nebula", into out.
-// Handles the escapes JSON.stringify writes; other characters, Greek letters among them,
-// come as they are, in UTF-8. Our messages are small and flat, so no JSON library is needed.
-static bool json_string(const char *json, const char *key, char *out, size_t out_len)
-{
-    char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
-    const char *p = strstr(json, pattern);
-    if (!p || out_len == 0) return false;
-    p += strlen(pattern);
-    size_t o = 0;
-    while (*p && *p != '"') {
-        unsigned code = (unsigned char)*p++;
-        if (code == '\\') {
-            char e = *p++;
-            switch (e) {
-            case 'n': code = '\n'; break;
-            case 't': code = '\t'; break;
-            case 'r': code = '\r'; break;
-            case 'b': code = '\b'; break;
-            case 'f': code = '\f'; break;
-            case 'u':
-                if (sscanf(p, "%4x", &code) != 1) return false;
-                p += 4;
-                break;
-            case '\0': return false;
-            default: code = (unsigned char)e; break; // \" \\ \/
-            }
-            put_utf8(code, out, out_len, &o);
-        } else if (o + 1 < out_len) {
-            out[o++] = (char)code; // a byte as it is, part of UTF-8 or not
-        }
-    }
-    out[o] = '\0';
-    return *p == '"';
-}
-
-// Reads a whole number after "key": in a JSON text, such as "bytes":523000. Up to 2^32 - 1,
-// for a CRC.
-static bool json_uint(const char *json, const char *key, uint32_t *value)
-{
-    char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return false;
-    p += strlen(pattern);
-    char *end;
-    unsigned long long n = strtoull(p, &end, 10);
-    if (end == p || n > UINT32_MAX) return false;
-    *value = (uint32_t)n;
-    return true;
-}
-
-// Reads true or false after "key": in a JSON text, such as "night":true.
-static bool json_bool(const char *json, const char *key, bool *value)
-{
-    char pattern[32];
-    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
-    const char *p = strstr(json, pattern);
-    if (!p) return false;
-    p += strlen(pattern);
-    if (strncmp(p, "true", 4) == 0) {
-        *value = true;
-    } else if (strncmp(p, "false", 5) == 0) {
-        *value = false;
-    } else {
-        return false;
-    }
-    return true;
-}
-
 // A binary view, from the view channel. See puck_protocol.h and the app's docs/puck.md.
 static void on_view(const char *message, size_t length)
 {
@@ -232,7 +144,11 @@ static void on_control(const char *text)
         view_state_set_app_state(night, solving);
         ESP_LOGI(TAG, "State: night %d, solving %d", night, solving);
     }
-    else if (strstr(text, "\"t\":\"catalogOk\"")) {
+    // What moves: {"t":"objects","sun":{...},"items":[...]}
+    else if (strstr(text, "\"t\":\"objects\"")) {
+        size_t n = moving_parse(text);
+        ESP_LOGI(TAG, "%u moving objects", (unsigned)n);
+    } else if (strstr(text, "\"t\":\"catalogOk\"")) {
         ESP_LOGI(TAG, "The app says our catalogue is current");
     }
 }
@@ -246,7 +162,7 @@ static void on_catalog(const char *message, size_t length)
         return;
     }
     // {"t":"catalogStart","id":..,"bytes":..,"parts":..,"crc32":..}
-    char text[CONTROL_MAX_BYTES];
+    char text[256];
     if (length >= sizeof(text)) return;
     memcpy(text, message, length);
     text[length] = '\0';
@@ -372,7 +288,7 @@ static void on_message(char *message, size_t length, void *user_data, uint16_t s
         return;
     }
 
-    char text[CONTROL_MAX_BYTES];
+    static char text[CONTROL_MAX_BYTES];
     if (length >= sizeof(text)) {
         ESP_LOGW(TAG, "Message of %u bytes on stream %u: too big, skipped", (unsigned)length,
                  stream_id);
@@ -434,6 +350,7 @@ static bool start_pairing(bool after_loss)
     catalog_cancel();
     catalog_acknowledge();
     view_state_clear();
+    moving_clear();
     channel_open_time = 0;
     restart_needed = false;
 

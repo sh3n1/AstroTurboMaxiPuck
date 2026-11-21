@@ -14,6 +14,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "moving.h"
 
 static const char *TAG = "sky";
 
@@ -26,6 +27,11 @@ static const char *TAG = "sky";
 #define COLOR_SKY 0x05070F
 #define COLOR_LINE_DAY 0x2A4170
 #define COLOR_LINE_NIGHT 0x4F6FAE
+#define COLOR_SOLAR_SYSTEM 0xFFD479
+// The Moon in the text's near-white, not the planets' yellow.
+#define COLOR_MOON 0xE8EBF5
+// The Moon's kind number (docs/puck.md, "Kinds").
+#define KIND_MOON 10
 static const uint32_t STAR_TINTS[] = {0xB9D0FF, 0xF4F6FF, 0xFFF3D6, 0xFFD2A1, 0xFFB08A};
 #define TINT_COUNT (sizeof(STAR_TINTS) / sizeof(STAR_TINTS[0]))
 // What is below the horizon is drawn at this opacity on the sky map (BELOW_HORIZON_OPACITY).
@@ -314,6 +320,29 @@ static void draw_stars(const frame_t *f, bool night)
     }
 }
 
+// The Moon, planets and asteroids, over the stars: a disc of their real size, but never
+// smaller than a bright star, in the app's colour for the solar system.
+static void draw_moving(const frame_t *f, bool night)
+{
+    static moving_object_t objects[MOVING_MAX]; // only the LVGL task draws
+    float sun[3];
+    size_t n = moving_get(objects, sun);
+    for (size_t i = 0; i < n; i++) {
+        const moving_object_t *o = &objects[i];
+        if (o->show_below != 255 && f->view->fov_deg >= o->show_below) continue;
+        float x, y;
+        bool below;
+        if (!project(f, o->v, &x, &y, &below)) continue;
+        bool moon = o->kind == KIND_MOON;
+        float min_px = (moon ? 6.0f : 3.0f) * STAR_SCALE;
+        float size_px = 2 * tanf(o->size_arcmin / 60 / 4 * DEG_TO_RAD) * f->scale; // radius
+        float radius = fmaxf(min_px, size_px);
+        if (x < -radius || y < -radius || x > SIZE_PX + radius || y > SIZE_PX + radius) continue;
+        float alpha = below && f->fade_below ? BELOW_HORIZON_OPACITY : 1;
+        draw_disc(x, y, radius, for_night(moon ? COLOR_MOON : COLOR_SOLAR_SYSTEM, night), alpha);
+    }
+}
+
 bool sky_draw_create(lv_obj_t *screen)
 {
     pixels = heap_caps_malloc(SIZE_PX * SIZE_PX * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
@@ -361,6 +390,7 @@ void sky_draw_frame(const puck_view_msg_t *view, bool night)
         // The eyepiece view shows no constellation lines, as the app's.
         if (f.fade_below) draw_lines(&f, night);
         draw_stars(&f, night);
+        draw_moving(&f, night);
     }
     lv_obj_invalidate(canvas);
     // How long drawing takes, now and then: at 30 views a second there are 33 ms for it all.

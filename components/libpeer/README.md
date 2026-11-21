@@ -35,6 +35,9 @@ Every change is marked with an `AstroTurboMaxiPuck:` comment.
 - `sctp.c`: a DATA_CHANNEL_OPEN's label is kept with its stream again (our rewrite of the
   packet reading had only acknowledged it), so `peer_connection_lookup_sid` finds channels
   by label.
+- `utils.c`: on the ESP32, `utils_random_string` (the ICE credentials) takes its characters
+  from the hardware random generator (`esp_random`). Upstream seeded `rand()` from the
+  clock, which a puck with no real clock makes predictable.
 - `sctp.c` test hook `SCTP_TEST_DROP_EVERY` (set in `CMakeLists.txt`, 0 is off): acts as if
   every Nth incoming DATA chunk was lost, to test resends and FORWARD-TSN.
 - **Lite pairing**, for the puck's one-QR-code pairing: `peer_connection_start_lite()` in
