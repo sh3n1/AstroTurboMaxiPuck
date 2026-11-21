@@ -21,7 +21,9 @@ How the puck's round 466×466 screen is laid out, and what each part does.
 ## Menu
 
 - Sensors
-- Zoom (the phone's map zooms with it; the puck still can't pan the map)
+- Zoom: shows +, −, ✓ and ✗ over the sky map; ✓ keeps the new field, ✗ goes back. The
+  puck's own zoom, apart from the phone's; it still can't pan the map. In the phone's
+  eyepiece view it follows the eyepiece's field.
 - Eyepiece
 - Lists
 - Alignment

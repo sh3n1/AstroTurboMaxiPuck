@@ -30,6 +30,7 @@
 #include "sky_draw.h"
 #include "view_state.h"
 #include "wifi.h"
+#include "zoom.h"
 
 static const char *TAG = "puck";
 
@@ -46,6 +47,9 @@ static const char *TAG = "puck";
 // right edge steps through the list playing on the phone. A long press switches night mode.
 #define SOLVE_TAP_RADIUS_PX 110
 #define STEP_TAP_EDGE_PX 120
+// Until the menu is built (task 19), a tap near the top edge, where Alt and Az are, opens the
+// zoom's buttons, as the menu's Zoom will.
+#define ZOOM_TAP_TOP_PX 120
 
 // The Wi-Fi and link status lines, near the bottom of the screen.
 static lv_obj_t *status_label;
@@ -122,7 +126,11 @@ static void on_tap(lv_event_t *event)
 
     view_state_t state;
     view_state_get(&state);
-    if (dx * dx + dy * dy < SOLVE_TAP_RADIUS_PX * SOLVE_TAP_RADIUS_PX) {
+    // While zooming, only the zoom's own buttons do anything.
+    if (zoom_active()) return;
+    if (point.y < ZOOM_TAP_TOP_PX) {
+        if (state.has_view && !(state.view.flags & PUCK_VIEW_FLAG_EYEPIECE)) zoom_open();
+    } else if (dx * dx + dy * dy < SOLVE_TAP_RADIUS_PX * SOLVE_TAP_RADIUS_PX) {
         if (!state.solving) link_send_command("{\"t\":\"solveNow\",\"trigger\":\"tap\"}");
     } else if (point.x < STEP_TAP_EDGE_PX) {
         link_send_command("{\"t\":\"step\",\"by\":-1}");
@@ -152,6 +160,7 @@ static void apply_palette(bool night)
     for (size_t i = 0; i < RING_COUNT; i++) {
         lv_obj_set_style_border_color(rings[i], lv_color_hex(night ? COLOR_NIGHT : COLOR_RETICLE), 0);
     }
+    zoom_set_night(night);
 }
 
 // One plain ring, centred on the screen.
@@ -214,15 +223,18 @@ static void refresh_view(lv_timer_t *timer)
             lv_obj_set_style_border_opa(rings[i], state.solving ? LV_OPA_40 : LV_OPA_COVER, 0);
         }
     }
+    static uint32_t shown_zoom;
     if (!night_changed && state.has_view == shown_view && state.view_count == shown_count &&
-        strcmp(state.target_name, shown_target) == 0) {
+        strcmp(state.target_name, shown_target) == 0 && zoom_revision() == shown_zoom) {
         return; // nothing new
     }
     shown_view = state.has_view;
     shown_count = state.view_count;
+    shown_zoom = zoom_revision();
     strcpy(shown_target, state.target_name);
-    lv_obj_set_hidden(previous_label, !state.has_view);
-    lv_obj_set_hidden(next_label, !state.has_view);
+    // The arrows make way for the zoom's − and + while it shows.
+    lv_obj_set_hidden(previous_label, !state.has_view || zoom_active());
+    lv_obj_set_hidden(next_label, !state.has_view || zoom_active());
 
     if (!state.has_view) {
         lv_label_set_text(pose_label, "");
@@ -232,7 +244,10 @@ static void refresh_view(lv_timer_t *timer)
         sky_draw_clear(state.night);
         return;
     }
-    const puck_view_msg_t *v = &state.view;
+    // The puck's own field, not the phone's, except in the phone's eyepiece view (zoom.c).
+    puck_view_msg_t shown = state.view;
+    zoom_apply(&shown);
+    const puck_view_msg_t *v = &shown;
     sky_draw_frame(v, state.night, state.eyepiece_field_deg);
     char text[96];
     snprintf(text, sizeof(text), "Alt %.1f°  Az %.1f°", v->alt_deg, v->az_deg);
@@ -294,6 +309,7 @@ static void draw_test_screen(void)
     lv_obj_align(next_label, LV_ALIGN_RIGHT_MID, -30, 0);
     lv_obj_set_hidden(previous_label, true);
     lv_obj_set_hidden(next_label, true);
+    zoom_create(screen);
     lv_timer_create(refresh_view, VIEW_REFRESH_MS, NULL);
 
     // Dark squares on white, as cameras read best, with the quiet zone around it.

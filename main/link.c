@@ -23,6 +23,7 @@
 #include "texts.h"
 #include "puck_protocol.h"
 #include "view_state.h"
+#include "zoom.h"
 
 static const char *TAG = "link";
 
@@ -151,6 +152,10 @@ static void on_control(const char *text)
     else if (strstr(text, "\"t\":\"texts\"")) {
         texts_parse(text);
         ESP_LOGI(TAG, "The app's words received");
+    }
+    // The rules for the puck's own zoom, which are the map's.
+    else if (strstr(text, "\"t\":\"mapRules\"")) {
+        zoom_set_rules(text);
     }
     // What moves: {"t":"objects","sun":{...},"items":[...]}
     else if (strstr(text, "\"t\":\"objects\"")) {

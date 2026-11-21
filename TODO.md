@@ -137,10 +137,12 @@ which messages it needs.
 21. **Settings → Brightness**: `board_set_brightness()`, kept in NVS. Depends on 19.
 22. **Sensors, Eyepiece, Lists, Alignment**: what each does on the puck, and the messages to
     the app. **Ask** for each. Depends on 19.
-22b. **Zoom**: zoom the map in and out from the puck. The puck mirrors the phone's map, so it
-    asks the app to change its field of view (a new `zoom` message), and the new view comes
-    back in `view`. Zooming isn't panning: the puck still can't move the map. **Ask:** how
-    (buttons in the menu, a step at a time, or preset fields of view). Depends on 6, 7, 19.
+22b. **Zoom.** *Written 2026-11-21, to test on the board.* The puck zooms on its own,
+    apart from the phone (decided 2026-11-21): `main/zoom.c` keeps its field, and shows +,
+    −, ✓ and ✗ over the map; ✓ keeps the new field, ✗ goes back. The rules (5° to 120°,
+    steps of 1.5, starting at 20°, the star limits) come from the app in `mapRules`. In the
+    phone's eyepiece view the puck follows the eyepiece's field. Until the menu exists
+    (task 19), a tap near the top edge opens the buttons. Later: keep the field in NVS.
 23. **Settings → Wi-Fi → Client**: choose the network and enter its password without
     menuconfig. Typing on a round screen is hard: perhaps sent from the app over the link,
     or set up through the puck's own access point. **Ask.** Depends on 19.

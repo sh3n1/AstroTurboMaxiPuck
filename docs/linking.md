@@ -27,9 +27,10 @@ puck works through it.
 
 - **Puck to phone:** what the user changes on the puck acts on the phone it links to (and, in
   Two phones, through it on the finder, as the screen's own changes do), such as choosing the
-  next target, a plate solve from a tap on the reticle, zoom or night mode.
+  next target, a plate solve from a tap on the reticle, or night mode. The puck's zoom is
+  its own, and doesn't change the phone's.
 - **Phone to puck:** what changes on the phone updates the puck's view, such as the target, the
-  map's view and zoom, or night mode.
+  map's view, or night mode.
 
 ## In the app: the Remote page
 
