@@ -58,6 +58,11 @@ Layout in `docs/screen-layout.md`. The app's look: rings at 0.5°, 2° and 4°, 
 crosshair on target, light-blue chevrons, never orange. Big text, red at full strength at
 night, no grey.
 
+*Tasks 9 to 14 done 2026-11-22, tested on the board (`main/screen.c`): the readout along
+the top edge over a dark band, rings without labels, guidance, the bottom third shown by a
+tap on the map for 15 s, Noto Sans for Greek letters (`main/fonts/`). Screenshots over the
+cable: `tools/screenshot.py`; the log's last 20 minutes: `tools/puck_log.py`.*
+
 9. **Screen framework**: one LVGL screen with the zones (top edge, centre, bottom third),
    the app's colours as one palette, and a night palette (full-strength red). Replace the
    bring-up test screen. Depends on 6.
@@ -130,29 +135,47 @@ night, no grey.
 
 ## 4. The menu
 
-Items in `docs/screen-layout.md`. Each needs its own design: what it shows on the puck, and
-which messages it needs.
+Decided 2026-11-22, in `docs/screen-layout.md`: watch-style (Wear OS, watchOS) chips with
+Material Symbols icons, and what each item does.
 
-19. **Menu screen**: opened by the Menu button, big round-friendly items, back to the map.
-    Depends on 13.
-20. **Night mode** item: the same switch as task 14. Depends on 14, 19.
-21. **Settings → Brightness**: `board_set_brightness()`, kept in NVS. Depends on 19.
-22. **Sensors, Eyepiece, Lists, Alignment**: what each does on the puck, and the messages to
-    the app. **Ask** for each. Depends on 19.
+19. **Menu screen.** *First version 2026-11-22 (Zoom, Night, Settings, Brightness), tested;
+    the user found it too industrial.* Restyle as a watch: chips, icons, the column that
+    snaps and shrinks at the edges, the title along the top edge. All items shown.
+20. **Night mode** item. *Built 2026-11-22: a bubble, filled when on; the long press on
+    the map is gone.* Depends on 14, 19.
+21. **Settings → Brightness**: − and +, kept in NVS (`main/brightness.c`). *Built
+    2026-11-22.*
+22. **Sensors**: a switch for the phone's motion sensors. *Built 2026-11-22 (the
+    `sensors` command), to test on the board.*
+22a. **View**: steps the phone through the sky map, eyepiece view and field ring, as the
+    app's view tile. *Built 2026-11-22 (the `view` command, and the view in `state`), to
+    test on the board.*
 22b. **Zoom.** *Done 2026-11-21, tested (works, not yet smooth).* The puck zooms on its own,
     apart from the phone (decided 2026-11-21): `main/zoom.c` keeps its field, and shows +,
     −, ✓ and ✗ over the map; ✓ keeps the new field, ✗ goes back. The rules (5° to 120°,
     steps of 1.5, starting at 20°, the star limits) come from the app in `mapRules`. In the
-    phone's eyepiece view the puck follows the eyepiece's field. Until the menu exists
-    (task 19), a tap near the top edge opens the buttons. Later: keep the field in NVS.
-23. **Settings → Wi-Fi → Client**: choose the network and enter its password without
-    menuconfig. Typing on a round screen is hard: perhaps sent from the app over the link,
-    or set up through the puck's own access point. **Ask.** Depends on 19.
-24. **Settings → Wi-Fi → AP**: the puck's own access point, for the field without a router:
-    the phone joins it. Pairing then works the same. Depends on 23.
-25. **Meade LX200 Repeater**: **Ask** what it should do. Perhaps the puck answers LX200
-    commands over Wi-Fi (TCP), so planetarium apps such as Stellarium or SkySafari see where
-    the telescope points. Depends on 6, 19.
+    phone's eyepiece view the puck follows the eyepiece's field. Later: keep the field in
+    NVS.
+22c. **Lists**: the phone's lists, then a list's targets; choosing one makes it the target,
+    and the arrows step through that list. *Built 2026-11-22, to test on the board:* the
+    `lists`, `listTargets` and `play` messages (the app's `docs/puck.md`, "Lists",
+    `puck-lists.ts`; the puck's `main/lists.c`). Offered: Best right now, In the reticle,
+    the user's lists, Messier and Caldwell; only the targets above the horizon, up to 60.
+    The pages are in `main/menu_lists.c`, built a few chips at a time (60 at once held the
+    screen for a second); LVGL has 512 KB more in PSRAM (`main/board.c`), as 60 chips
+    overflowed its 64 KB and restarted the puck.
+22d. **Alignment**, guided as the app's: the easiest bright star or the target, guidance,
+    "Align" when centred, and "Remove alignment". *Built 2026-11-22, to test on the board:*
+    the `alignStars`, `alignChoose`, `alignNow`, `alignRemove` and `alignStatus` messages
+    (the app's `docs/puck.md`, "Alignment", `puck-align.service.ts`); the page in
+    `main/menu_lists.c`, ✗ and Align over the map in `main/align.c`.
+23. **Settings → Wi-Fi → Client**: the puck's own network for a moment, a QR code to join
+    it, and a setup web page (ESP-IDF's `esp_http_server`) listing the networks seen and
+    taking the password, kept in NVS. Also at start-up with no network saved or found.
+24. **Settings → Wi-Fi → AP**: a switch; the puck's own network, a Wi-Fi QR code to join
+    it, then the pairing QR. Depends on 23.
+25. **Settings → Meade LX200 Repeater**: a switch; LX200 over TCP port 4030: where the telescope
+    points, for Stellarium or SkySafari, and their GoTo becomes the target. Depends on 6, 19.
 
 ## 5. Power
 
@@ -187,8 +210,11 @@ which messages it needs.
   again (with fresh credentials and secret), so it isn't left on screen for anyone to scan.
 - **Remove the lite pairing check logging** in `components/libpeer/src/agent.c` once pairing
   is known to be reliable.
-- **Pair again without a new QR code** after the puck or the app restarts (keep the
-  certificate and a pairing key in NVS and the app's storage).
+- **Reconnect without a new QR code.** *Built 2026-11-22, to test on the board.* The puck
+  keeps the same code (port, ICE credentials, certificate, secret) until it restarts
+  (`peer_connection_keep_identity` in libpeer, `new_code_needed` in `main/link.c`), and the
+  app has a Reconnect button. Later perhaps: across restarts too (the certificate and a
+  pairing key in NVS and the app's storage).
 - **Strip libpeer's audio and video code**, so libsrtp (`sepfy/srtp`) and its compiler
   workaround in `CMakeLists.txt` can go.
 - **Weak Wi-Fi signal** (−91 dBm on the first test): measure the link near the router; the

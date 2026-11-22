@@ -41,6 +41,18 @@ static const char *TAG = "sky";
 #define CHEVRON_MAX_SPACING_PX 18.0f
 #define CHEVRON_SPACING_PX_PER_DEG 0.5f
 static const float CHEVRON_FADE[] = {0.35f, 0.65f, 1.0f};
+// The guide in the normal view (the app's drawPointer): chevrons this far outside the
+// reticle's outer ring, and a dotted line from a little further out to the target once it is
+// on the screen and far enough from the rings.
+#define POINTER_GAP_PX (24 * PX_SCALE)
+#define POINTER_CHEVRON_PX (4 * PX_SCALE)
+#define POINTER_LINE_START_PX (34 * PX_SCALE)
+#define POINTER_LINE_MIN_PX (40 * PX_SCALE)
+#define POINTER_DOT_PX (2 * PX_SCALE)
+#define POINTER_DOT_GAP_PX (5 * PX_SCALE)
+#define POINTER_LINE_WIDTH_PX (1.5f * PX_SCALE)
+// The reticle's outer ring, 4° across (the app's RETICLE_RINGS_DEG).
+#define RETICLE_OUTER_DEG 4.0f
 
 // Sizes, as the app's (draw-targets.ts), in the puck's pixels: its pixels are smaller than a
 // phone's CSS pixels (see STAR_SCALE in sky_draw.c).
@@ -213,7 +225,7 @@ static void draw_target(const sky_frame_t *f, bool night)
     float x = SKY_CENTRE_PX + r * sinf(dir), y = SKY_CENTRE_PX - r * cosf(dir);
     if (x < -CROSSHAIR_LENGTH_PX || y < -CROSSHAIR_LENGTH_PX || x > SKY_SIZE_PX + CROSSHAIR_LENGTH_PX ||
         y > SKY_SIZE_PX + CROSSHAIR_LENGTH_PX) {
-        return; // off the screen: the chevrons point to it (task 11)
+        return; // off the screen: the chevrons point to it (draw_pointer)
     }
     static const int8_t arms[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
     for (int pass = 0; pass < 2; pass++) {
@@ -248,6 +260,34 @@ void sky_draw_chevrons(float x, float y, float angle, float distance_deg, bool n
     }
     #undef CHEVRON_X
     #undef CHEVRON_Y
+}
+
+// The way to the target from the reticle, in the normal view, until it's reached (the app's
+// drawPointer). The eyepiece view has its own, round its circle (sky_draw.c).
+static void draw_pointer(const sky_frame_t *f, bool night, float eyepiece_field_deg)
+{
+    const puck_view_msg_t *v = f->view;
+    if (!f->fade_below || isnan(v->target_dist_deg) || isnan(v->target_dir_deg)) return;
+    if (sky_on_target(v, eyepiece_field_deg)) return;
+    float rings_deg = (v->flags & PUCK_VIEW_FLAG_RING) && eyepiece_field_deg > 0 ? eyepiece_field_deg : RETICLE_OUTER_DEG;
+    float radius = sky_radius_px(f, rings_deg) + POINTER_GAP_PX;
+    float angle = v->target_dir_deg * SKY_DEG_TO_RAD;
+    float dx = sinf(angle), dy = -cosf(angle);
+
+    // The target's place, as the crosshair's (draw_target).
+    float r = sky_radius_px(f, 2 * v->target_dist_deg);
+    float tx = SKY_CENTRE_PX + r * dx, ty = SKY_CENTRE_PX + r * dy;
+    bool in_view = tx >= 0 && tx <= SKY_SIZE_PX && ty >= 0 && ty <= SKY_SIZE_PX;
+    if (in_view && r > radius + POINTER_LINE_MIN_PX) {
+        uint32_t color = sky_for_night(COLOR_GUIDE, night);
+        for (float at = radius + POINTER_LINE_START_PX; at < r; at += POINTER_DOT_PX + POINTER_DOT_GAP_PX) {
+            float to = fminf(r, at + POINTER_DOT_PX);
+            sky_line(SKY_CENTRE_PX + at * dx, SKY_CENTRE_PX + at * dy, SKY_CENTRE_PX + to * dx,
+                     SKY_CENTRE_PX + to * dy, POINTER_LINE_WIDTH_PX, color, 1);
+        }
+    }
+    sky_draw_chevrons(SKY_CENTRE_PX + dx * (radius + POINTER_CHEVRON_PX), SKY_CENTRE_PX + dy * (radius + POINTER_CHEVRON_PX),
+                      angle, v->target_dist_deg, night);
 }
 
 // ---- The parts ----
@@ -381,7 +421,7 @@ static void draw_names(const sky_frame_t *f, bool night)
     }
 }
 
-void sky_objects_draw(const sky_frame_t *f, bool night,
+void sky_objects_draw(const sky_frame_t *f, bool night, float eyepiece_field_deg,
                       const moving_object_t *moving, size_t moving_count)
 {
     sky_labels_begin();
@@ -390,4 +430,5 @@ void sky_objects_draw(const sky_frame_t *f, bool night,
     draw_catalog_objects(f, night);
     if (f->fade_below) draw_names(f, night);
     draw_target(f, night);
+    draw_pointer(f, night, eyepiece_field_deg);
 }

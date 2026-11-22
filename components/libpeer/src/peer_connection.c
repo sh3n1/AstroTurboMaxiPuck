@@ -571,6 +571,11 @@ void peer_connection_sctp_stats(PeerConnection* pc, uint32_t* data_in, uint32_t*
   *resent = pc->sctp.stats.resent;
 }
 
+void peer_connection_keep_identity(int keep) {
+  agent_keep_identity(keep);
+  dtls_srtp_keep_identity(keep);
+}
+
 int peer_connection_lite_peer_found(PeerConnection* pc) {
   return pc->agent.selected_pair != NULL;
 }

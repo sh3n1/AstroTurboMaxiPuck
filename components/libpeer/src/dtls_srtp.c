@@ -120,12 +120,65 @@ static int dtls_srtp_generate_keypair(DtlsSrtp* dtls_srtp) {
 #endif
 }
 
+#if MBEDTLS_VERSION_NUMBER >= 0x04000000
+// AstroTurboMaxiPuck: the last key and certificate made, owned here rather than by a
+// connection, and reused while keep_identity is on (peer_connection_keep_identity).
+static int keep_identity;
+static mbedtls_svc_key_id_t kept_key = MBEDTLS_SVC_KEY_ID_INIT;
+static char* kept_cert_pem;
+
+void dtls_srtp_keep_identity(int keep) {
+  keep_identity = keep;
+}
+
+// Takes the kept key and certificate, if there are any and they're wanted: 1 when taken.
+static int dtls_srtp_use_kept(DtlsSrtp* dtls_srtp) {
+  if (!keep_identity || !kept_cert_pem || mbedtls_svc_key_id_is_null(kept_key)) {
+    return 0;
+  }
+  if (mbedtls_pk_wrap_psa(&dtls_srtp->pkey, kept_key) != 0 ||
+      mbedtls_x509_crt_parse(&dtls_srtp->cert, (const unsigned char*)kept_cert_pem, strlen(kept_cert_pem) + 1) != 0) {
+    LOGE("Couldn't reuse the kept certificate");
+    mbedtls_pk_free(&dtls_srtp->pkey);
+    mbedtls_pk_init(&dtls_srtp->pkey);
+    mbedtls_x509_crt_free(&dtls_srtp->cert);
+    mbedtls_x509_crt_init(&dtls_srtp->cert);
+    return 0;
+  }
+  return 1;
+}
+
+// Keeps a new key and certificate in place of the old ones: the connection no longer
+// destroys the key.
+static void dtls_srtp_keep_new(DtlsSrtp* dtls_srtp, const unsigned char* cert_pem) {
+  char* copy = strdup((const char*)cert_pem);
+  if (!copy) {
+    return;  // not kept: the connection destroys its key as usual
+  }
+  if (!mbedtls_svc_key_id_is_null(kept_key)) {
+    psa_destroy_key(kept_key);
+  }
+  free(kept_cert_pem);
+  kept_key = dtls_srtp->psa_key_id;
+  kept_cert_pem = copy;
+  dtls_srtp->psa_key_id = MBEDTLS_SVC_KEY_ID_INIT;
+}
+#else
+void dtls_srtp_keep_identity(int keep) {
+  (void)keep;  // AstroTurboMaxiPuck: only on mbedTLS 4
+}
+#endif
+
 static int dtls_srtp_selfsign_cert(DtlsSrtp* dtls_srtp) {
   int ret;
 #if MBEDTLS_VERSION_NUMBER >= 0x04000000
   mbedtls_x509write_cert crt;
   unsigned char* cert_buf = NULL;
   unsigned char serial_raw[16];
+
+  if (dtls_srtp_use_kept(dtls_srtp)) {
+    return 0;
+  }
 
   cert_buf = (unsigned char*)malloc(RSA_KEY_LENGTH * 2);
   if (cert_buf == NULL) {
@@ -188,10 +241,12 @@ static int dtls_srtp_selfsign_cert(DtlsSrtp* dtls_srtp) {
 
   ret = mbedtls_x509_crt_parse(&dtls_srtp->cert, cert_buf, strlen((char*)cert_buf) + 1);
   mbedtls_x509write_crt_free(&crt);
-  free(cert_buf);
   if (ret != 0) {
     LOGE("mbedtls_x509_crt_parse failed -0x%.4x", (unsigned int)-ret);
+  } else {
+    dtls_srtp_keep_new(dtls_srtp, cert_buf);
   }
+  free(cert_buf);
   return ret;
 #else
 

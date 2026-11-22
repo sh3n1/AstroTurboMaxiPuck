@@ -50,3 +50,6 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # Optimised for speed (-O2), not for debugging: drawing the sky map needs it.
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Screenshots over the USB cable (main/screenshot.c, tools/screenshot.py).
+CONFIG_LV_USE_SNAPSHOT=y

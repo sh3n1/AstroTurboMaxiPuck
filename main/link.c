@@ -19,6 +19,8 @@
 #include "freertos/task.h"
 #include "catalog.h"
 #include "json_read.h"
+#include "align.h"
+#include "lists.h"
 #include "moving.h"
 #include "peer.h"
 #include "texts.h"
@@ -28,8 +30,10 @@
 
 static const char *TAG = "link";
 
-// The QR code's text starts with this, so a wrong code is told apart at once.
-#define QR_PREFIX "AFP1:"
+// The QR code's text starts with this, so a wrong code is told apart at once. AFP2: the
+// payload in base32, all capitals and digits, which a QR code holds in its compact
+// alphanumeric mode (qr_view.h). The app also reads AFP1, the first firmware's base64url.
+#define QR_PREFIX "AFP2:"
 #define SECRET_BYTES 16
 #define FINGERPRINT_BYTES 32 // SHA-256
 // IPv4 (4) + port (2) + ICE ufrag (4) + ICE password (24) + fingerprint + secret
@@ -56,7 +60,7 @@ static const char *TAG = "link";
 #define CATALOG_STALL_US (15 * 1000 * 1000)
 // Commands waiting for the link task to send them, and the biggest one.
 #define COMMAND_QUEUE_LENGTH 8
-#define COMMAND_MAX_BYTES 96
+#define COMMAND_MAX_BYTES 160 // a play command holds a list's UUID and a target's id
 // Packets read at most each time round the link task's loop, before it rests a millisecond.
 // One a millisecond was too few: the catalogue comes in bursts of dozens of packets, and the
 // rest were dropped and resent seconds later, holding up everything behind them.
@@ -73,6 +77,19 @@ static bool authenticated;
 static int64_t channel_open_time;     // 0 until the data channel opens
 static int64_t peer_found_time;       // 0 until the app is first heard
 static volatile bool restart_needed;  // set in libpeer's callbacks, acted on by the task
+static const char *volatile restart_reason; // why, for the record of losses below
+// The pairing code (address, port, ICE credentials, certificate and secret) stays the same
+// until the puck restarts, so the app can link again with the code it read, without a new
+// scan. A new one only at start-up, and after a wrong secret: someone tried an old code.
+static volatile bool new_code_needed = true;
+
+// The links lost so far, and the last one's reason, repeated in the log every 5 s: a loss
+// happens when no one is watching the log, and its own line is soon gone.
+static unsigned losses;
+static const char *last_loss_reason = "";
+static int64_t last_loss_us;
+static int64_t last_loss_lasted_us;
+static int64_t paired_us; // when the app sent its secret
 static QueueHandle_t commands;        // from the screen, sent by the link task
 static int64_t last_heard_us;         // when the app's last message came, once paired
 static int64_t last_sent_us;          // when we last sent the app anything
@@ -92,6 +109,26 @@ static void base64url(const uint8_t *in, size_t len, char *out)
         if (i + 1 < len) out[o++] = abc[n >> 6 & 63];
         if (i + 2 < len) out[o++] = abc[n & 63];
     }
+    out[o] = '\0';
+}
+
+// Bytes as base32 (RFC 4648) without padding: capitals and 2 to 7.
+static void base32(const uint8_t *in, size_t len, char *out)
+{
+    static const char abc[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    size_t o = 0;
+    uint32_t value = 0;
+    int bits = 0;
+    for (size_t i = 0; i < len; i++) {
+        value = (value << 8) | in[i];
+        bits += 8;
+        while (bits >= 5) {
+            bits -= 5;
+            out[o++] = abc[(value >> bits) & 31];
+        }
+        value &= (1u << bits) - 1;
+    }
+    if (bits > 0) out[o++] = abc[(value << (5 - bits)) & 31];
     out[o] = '\0';
 }
 
@@ -119,9 +156,9 @@ static bool make_qr_text(const PeerLiteInfo *info, char *out, size_t out_len)
     }
     memcpy(p, secret, SECRET_BYTES);
 
-    if (out_len < strlen(QR_PREFIX) + (QR_PAYLOAD_BYTES * 4 + 2) / 3 + 1) return false;
+    if (out_len < strlen(QR_PREFIX) + (QR_PAYLOAD_BYTES * 8 + 4) / 5 + 1) return false;
     strcpy(out, QR_PREFIX);
-    base64url(payload, QR_PAYLOAD_BYTES, out + strlen(QR_PREFIX));
+    base32(payload, QR_PAYLOAD_BYTES, out + strlen(QR_PREFIX));
     return true;
 }
 
@@ -154,13 +191,24 @@ static void on_control(const char *text)
     }
     // What the puck shows besides the map: {"t":"state","night":false,"solving":false,...}
     else if (strstr(text, "\"t\":\"state\"")) {
-        bool night = false, solving = false;
-        float eyepiece_field = 0;
-        json_bool(text, "night", &night);
-        json_bool(text, "solving", &solving);
-        json_float(text, "eyepieceFieldDeg", &eyepiece_field);
-        view_state_set_app_state(night, solving, eyepiece_field);
-        ESP_LOGI(TAG, "State: night %d, solving %d", night, solving);
+        view_state_app_t app = {0};
+        json_bool(text, "night", &app.night);
+        json_bool(text, "solving", &app.solving);
+        json_bool(text, "sensorsOn", &app.sensors_on);
+        json_float(text, "eyepieceFieldDeg", &app.eyepiece_field_deg);
+        char view[16] = "";
+        json_string(text, "view", view, sizeof(view));
+        app.view_mode = strcmp(view, "eyepiece") == 0 ? VIEW_MODE_EYEPIECE
+                        : strcmp(view, "ring") == 0   ? VIEW_MODE_RING
+                                                      : VIEW_MODE_SKY;
+        view_state_set_app_state(&app);
+        ESP_LOGI(TAG, "State: night %d, solving %d, sensors %d, view %s", app.night, app.solving, app.sensors_on,
+                 view);
+    }
+    // The app's record of the link lost before: {"t":"appLog","text":"..."}, kept in the log.
+    else if (strstr(text, "\"t\":\"appLog\"")) {
+        char line[400];
+        if (json_string(text, "text", line, sizeof(line))) ESP_LOGW(TAG, "The app's record of the loss: %s", line);
     }
     // The words to show, in the app's language: {"t":"texts","compass":{...},"credits":".."}
     else if (strstr(text, "\"t\":\"texts\"")) {
@@ -170,6 +218,21 @@ static void on_control(const char *text)
     // The rules for the puck's own zoom, which are the map's.
     else if (strstr(text, "\"t\":\"mapRules\"")) {
         zoom_set_rules(text);
+    }
+    // The menu's lists: {"t":"lists","lists":[...]}, and one list's targets.
+    else if (strstr(text, "\"t\":\"lists\"")) {
+        lists_parse_lists(text);
+        ESP_LOGI(TAG, "The app's lists received");
+    } else if (strstr(text, "\"t\":\"listTargets\"")) {
+        lists_parse_targets(text);
+        ESP_LOGI(TAG, "A list's targets received");
+    }
+    // The menu's Alignment page, and where an alignment from the puck is.
+    else if (strstr(text, "\"t\":\"alignStars\"")) {
+        lists_parse_align(text);
+        ESP_LOGI(TAG, "The stars to align on received");
+    } else if (strstr(text, "\"t\":\"alignStatus\"")) {
+        align_set_status(text);
     }
     // What moves: {"t":"objects","sun":{...},"items":[...]}
     else if (strstr(text, "\"t\":\"objects\"")) {
@@ -311,12 +374,14 @@ static void check_auth(const char *text)
     snprintf(expected, sizeof(expected), "\"secret\":\"%s\"", secret_text);
     if (strstr(text, expected)) {
         authenticated = true;
-        last_heard_us = last_sent_us = esp_timer_get_time();
+        last_heard_us = last_sent_us = paired_us = esp_timer_get_time();
         hello_needed = true; // sent from the link task, outside libpeer's callback
         ESP_LOGI(TAG, "App paired");
         ui.show_state("Linked");
     } else {
         ESP_LOGW(TAG, "Wrong secret: dropping the link");
+        restart_reason = "wrong secret";
+        new_code_needed = true;
         restart_needed = true;
     }
 }
@@ -368,6 +433,7 @@ static void on_open(void *user_data)
 static void on_close(void *user_data)
 {
     ESP_LOGI(TAG, "Data channel closed");
+    restart_reason = "data channel closed";
     restart_needed = true;
 }
 
@@ -376,6 +442,7 @@ static void on_connection_state(PeerConnectionState state, void *user_data)
     ESP_LOGI(TAG, "Connection %s", peer_connection_state_to_string(state));
     if (state == PEER_CONNECTION_FAILED || state == PEER_CONNECTION_DISCONNECTED ||
         state == PEER_CONNECTION_CLOSED) {
+        restart_reason = peer_connection_state_to_string(state);
         restart_needed = true;
     } else if (state == PEER_CONNECTION_CONNECTED) {
         ui.show_state("Connecting...");
@@ -387,6 +454,8 @@ static void on_connection_state(PeerConnectionState state, void *user_data)
 static bool start_pairing(bool after_loss)
 {
     if (connection) peer_connection_destroy(connection);
+    bool new_code = new_code_needed;
+    peer_connection_keep_identity(!new_code);
     PeerConfiguration config = {.datachannel = DATA_CHANNEL_STRING};
     connection = peer_connection_create(&config);
     if (!connection) return false;
@@ -395,8 +464,11 @@ static bool start_pairing(bool after_loss)
 
     PeerLiteInfo info;
     if (peer_connection_start_lite(connection, &info) != 0) return false;
-    esp_fill_random(secret, sizeof(secret));
-    base64url(secret, sizeof(secret), secret_text);
+    if (new_code) {
+        esp_fill_random(secret, sizeof(secret));
+        base64url(secret, sizeof(secret), secret_text);
+        new_code_needed = false;
+    }
     authenticated = false;
     hello_needed = false;
     // A catalogue cut short starts again from the beginning next time; an answer not sent
@@ -454,6 +526,11 @@ static void link_task(void *arg)
                          "%u write errors, %u resent", (unsigned)data_in, (unsigned)sacks_in, (unsigned)sack_cum,
                          (unsigned)next_tsn, (unsigned)heartbeats, (unsigned)write_errors, (unsigned)resent);
             }
+            if (losses) {
+                ESP_LOGI(TAG, "Links lost: %u; the last %u s ago, after %u s linked: %s", losses,
+                         (unsigned)((now - last_loss_us) / 1000000), (unsigned)(last_loss_lasted_us / 1000000),
+                         last_loss_reason);
+            }
         }
         bool auth_late = channel_open_time && !authenticated && now - channel_open_time > AUTH_TIMEOUT_US;
         if (auth_late) ESP_LOGW(TAG, "No secret in time: dropping the link");
@@ -465,6 +542,13 @@ static void link_task(void *arg)
         if (restart_needed || auth_late || connect_late || silent) {
             // Paired until now: the link is lost, rather than refused.
             bool after_loss = authenticated;
+            if (after_loss) {
+                losses++;
+                last_loss_reason = silent ? "nothing from the app for 4 s" : restart_reason ? restart_reason : "?";
+                last_loss_us = now;
+                last_loss_lasted_us = now - paired_us;
+            }
+            restart_reason = NULL;
             while (!start_pairing(after_loss)) {
                 vTaskDelay(pdMS_TO_TICKS(2000));
             }

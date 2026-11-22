@@ -23,12 +23,30 @@ void agent_clear_candidates(Agent* agent) {
   agent->candidate_pairs_num = 0;
 }
 
+// AstroTurboMaxiPuck: the port and ICE credentials of the last connection, reused while
+// keep_identity is on (peer_connection_keep_identity).
+static int keep_identity;
+static int kept_port;
+static char kept_ufrag[ICE_UFRAG_LENGTH + 1];
+static char kept_upwd[ICE_UPWD_LENGTH + 1];
+
+void agent_keep_identity(int keep) {
+  keep_identity = keep;
+}
+
 int agent_create(Agent* agent) {
   int ret;
-  if ((ret = udp_socket_open(&agent->udp_sockets[0], AF_INET, 0)) < 0) {
+  int port = keep_identity ? kept_port : 0;
+  if ((ret = udp_socket_open(&agent->udp_sockets[0], AF_INET, port)) < 0 && port != 0) {
+    // The port is taken: a new one, so a new pairing code is needed.
+    LOGW("Port %d taken, using another", port);
+    ret = udp_socket_open(&agent->udp_sockets[0], AF_INET, 0);
+  }
+  if (ret < 0) {
     LOGE("Failed to create UDP socket.");
     return ret;
   }
+  kept_port = agent->udp_sockets[0].bind_addr.port;
   LOGI("create IPv4 UDP socket: %d", agent->udp_sockets[0].fd);
 
 #if CONFIG_IPV6
@@ -288,8 +306,15 @@ void agent_create_ice_credential(Agent* agent) {
   memset(agent->local_ufrag, 0, sizeof(agent->local_ufrag));
   memset(agent->local_upwd, 0, sizeof(agent->local_upwd));
 
+  if (keep_identity && kept_ufrag[0]) {
+    strncpy(agent->local_ufrag, kept_ufrag, sizeof(agent->local_ufrag) - 1);
+    strncpy(agent->local_upwd, kept_upwd, sizeof(agent->local_upwd) - 1);
+    return;
+  }
   utils_random_string(agent->local_ufrag, 4);
   utils_random_string(agent->local_upwd, 24);
+  strncpy(kept_ufrag, agent->local_ufrag, sizeof(kept_ufrag) - 1);
+  strncpy(kept_upwd, agent->local_upwd, sizeof(kept_upwd) - 1);
 }
 
 void agent_get_local_description(Agent* agent, char* description, int length) {

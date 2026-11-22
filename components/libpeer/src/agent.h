@@ -92,6 +92,9 @@ void agent_clear_candidates(Agent* agent);
 
 int agent_create(Agent* agent);
 
+/** AstroTurboMaxiPuck: reuse the last agent's UDP port and ICE credentials (peer_connection.h). */
+void agent_keep_identity(int keep);
+
 void agent_destroy(Agent* agent);
 
 void agent_update_candidate_pairs(Agent* agent);

@@ -89,6 +89,9 @@ typedef struct DtlsSrtp {
 
 int dtls_srtp_init(DtlsSrtp* dtls_srtp, DtlsSrtpRole role, void* user_data);
 
+/** AstroTurboMaxiPuck: reuse the last key and certificate (peer_connection.h). */
+void dtls_srtp_keep_identity(int keep);
+
 void dtls_srtp_deinit(DtlsSrtp* dtls_srtp);
 
 int dtls_srtp_create_cert(DtlsSrtp* dtls_srtp);

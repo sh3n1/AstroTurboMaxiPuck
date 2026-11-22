@@ -13,12 +13,16 @@
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_co5300.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_touch_cst9217.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
+#include "freertos/task.h"
 
 static const char *TAG = "board";
 
@@ -45,6 +49,11 @@ static const char *TAG = "board";
 
 // LVGL draws in bands of this many lines, two buffers so one is sent while the next is drawn.
 #define DRAW_BUFFER_LINES 50
+// LVGL's own pool (CONFIG_LV_MEM_SIZE, 64 KB, internal RAM) fills with a menu page of
+// 60 chips, and LVGL crashes when it runs out; more pools in PSRAM leave room. Each can be
+// no bigger than LVGL's own (its allocator's largest block is CONFIG_LV_MEM_SIZE).
+#define LVGL_PSRAM_POOLS 8
+#define LVGL_PSRAM_POOL_BYTES CONFIG_LV_MEM_SIZE
 
 // The CO5300 brightness command (0x51), wrapped the way the QSPI panel IO expects a command.
 #define LCD_CMD_BRIGHTNESS ((0x02 << 24) | (0x51 << 8))
@@ -108,6 +117,50 @@ static esp_err_t start_screen(void)
     return esp_lcd_panel_disp_on_off(lcd_panel, true);
 }
 
+// The touch chip is read by a task of its own, this often, and a press is kept until LVGL has
+// seen it. LVGL reads touch only between frames, and a frame of the sky map takes about
+// 50 ms: read there, a quick tap could start and end unseen (taps on the reticle were missed).
+#define TOUCH_POLL_MS 15
+#define TOUCH_TASK_STACK 3072
+#define TOUCH_TASK_PRIORITY 5 // above LVGL's, so it reads on time while a frame is drawn
+
+static esp_lcd_touch_handle_t touch;
+static portMUX_TYPE touch_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool touch_down;     // a finger on the screen now
+static bool touch_pending;  // pressed since LVGL last read
+static uint16_t touch_x, touch_y;
+
+static void poll_touch(void *arg)
+{
+    for (;;) {
+        esp_lcd_touch_point_data_t point;
+        uint8_t count = 0;
+        if (esp_lcd_touch_read_data(touch) == ESP_OK) esp_lcd_touch_get_data(touch, &point, &count, 1);
+        taskENTER_CRITICAL(&touch_lock);
+        touch_down = count > 0;
+        if (touch_down) {
+            touch_pending = true;
+            touch_x = point.x;
+            touch_y = point.y;
+        }
+        taskEXIT_CRITICAL(&touch_lock);
+        vTaskDelay(pdMS_TO_TICKS(TOUCH_POLL_MS));
+    }
+}
+
+// LVGL's touch reading: pressed if a finger is down, or was since the last read, so even a
+// tap between two reads shows as pressed once, then released.
+static void read_touch(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    taskENTER_CRITICAL(&touch_lock);
+    bool pressed = touch_down || touch_pending;
+    touch_pending = false;
+    data->point.x = touch_x;
+    data->point.y = touch_y;
+    taskEXIT_CRITICAL(&touch_lock);
+    data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
 static esp_err_t start_touch(esp_lcd_touch_handle_t *touch)
 {
     i2c_master_bus_handle_t i2c;
@@ -145,6 +198,16 @@ lv_display_t *board_start(void)
     lvgl_port_cfg_t lvgl = ESP_LVGL_PORT_INIT_CONFIG();
     lvgl.task_affinity = 1;
     if (lvgl_port_init(&lvgl) != ESP_OK) return NULL;
+    if (lvgl_port_lock(0)) {
+        int added = 0;
+        for (int i = 0; i < LVGL_PSRAM_POOLS; i++) {
+            void *pool = heap_caps_malloc(LVGL_PSRAM_POOL_BYTES, MALLOC_CAP_SPIRAM);
+            if (pool && lv_mem_add_pool(pool, LVGL_PSRAM_POOL_BYTES)) added++;
+            else heap_caps_free(pool);
+        }
+        lvgl_port_unlock();
+        ESP_LOGI(TAG, "LVGL memory: %d KB more in PSRAM", added * LVGL_PSRAM_POOL_BYTES / 1024);
+    }
 
     const lvgl_port_display_cfg_t display_config = {
         .io_handle = lcd_io,
@@ -164,10 +227,16 @@ lv_display_t *board_start(void)
     if (!display) return NULL;
 
     // Without touch the screen still works, so this is logged rather than fatal.
-    esp_lcd_touch_handle_t touch = NULL;
     if (start_touch(&touch) == ESP_OK) {
-        const lvgl_port_touch_cfg_t touch_config = {.disp = display, .handle = touch};
-        lvgl_port_add_touch(&touch_config);
+        // Its stack in PSRAM: internal RAM is kept for the Wi-Fi and the link.
+        xTaskCreatePinnedToCoreWithCaps(poll_touch, "touch", TOUCH_TASK_STACK, NULL, TOUCH_TASK_PRIORITY, NULL, 1,
+                                        MALLOC_CAP_SPIRAM);
+        lvgl_port_lock(0);
+        lv_indev_t *indev = lv_indev_create();
+        lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+        lv_indev_set_read_cb(indev, read_touch);
+        lv_indev_set_display(indev, display);
+        lvgl_port_unlock();
     } else {
         ESP_LOGE(TAG, "Touch didn't start");
     }

@@ -145,6 +145,14 @@ typedef struct PeerLiteInfo {
 int peer_connection_start_lite(PeerConnection* pc, PeerLiteInfo* info);
 
 /**
+ * AstroTurboMaxiPuck: whether connections made from now on reuse the last one's UDP port,
+ * ICE credentials and DTLS certificate, so that what the other side read once (a QR code)
+ * still works after a lost link. Off: each makes new ones, as libpeer does. Call before
+ * peer_connection_create.
+ */
+void peer_connection_keep_identity(int keep);
+
+/**
  * AstroTurboMaxiPuck: in lite pairing, whether the other side has been heard (a valid
  * binding request), so the application can give up if the link doesn't follow in time.
  */

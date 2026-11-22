@@ -24,7 +24,7 @@ app's "Two phones" mode.
     the one-QR-code pairing with the app and libpeer fixes (`main/link.c`,
     `components/libpeer/README.md`); the binary `view` and `targetInfo` (`main/view_state.c`),
     shown on a test screen (`main/main.c`) with rings that follow the field of view; and the
-    commands (reticle tap, step, night by long press) with the app's `state`.
+    commands (reticle tap, step, night from the menu) with the app's `state`.
   - **Also tested on the board (2026-11-21):** a lost link noticed both ways (`ping`, 4 s
     of silence); the sky catalogue (2.1 MB, faint stars included) sent by the app and kept in
     a 4 MB flash partition (`main/catalog.c`); the sky drawn behind the rings as the phone's
