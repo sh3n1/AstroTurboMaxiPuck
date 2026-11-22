@@ -46,12 +46,14 @@ void view_state_set_target(const char *name)
     taskEXIT_CRITICAL(&lock);
 }
 
-void view_state_set_app_state(bool night, bool solving, float eyepiece_field_deg)
+void view_state_set_app_state(const view_state_app_t *app)
 {
     taskENTER_CRITICAL(&lock);
-    state.night = night;
-    state.solving = solving;
-    state.eyepiece_field_deg = eyepiece_field_deg;
+    state.night = app->night;
+    state.solving = app->solving;
+    state.sensors_on = app->sensors_on;
+    state.view_mode = app->view_mode;
+    state.eyepiece_field_deg = app->eyepiece_field_deg;
     taskEXIT_CRITICAL(&lock);
 }
 

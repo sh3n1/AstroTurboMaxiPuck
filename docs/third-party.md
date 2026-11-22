@@ -16,6 +16,10 @@ downloaded from the ESP Component Registry at build time (see `main/idf_componen
 | libpeer (`components/libpeer/`, our copy) | WebRTC                        | MIT        | sepfy            |
 | `sepfy/srtp` (libsrtp, needed by libpeer) | SRTP                          | BSD-3-Clause (libsrtp), MIT (ESP port) | Cisco Systems; nvannote |
 
+The fonts for text (`main/fonts/`) are Noto Sans (SIL Open Font License 1.1, Copyright The
+Noto Project Authors), converted for LVGL with lv_font_conv (MIT); see
+`main/fonts/README.md`. The OFL allows bundling the font with software under any licence.
+
 libpeer is copied into this repository with our changes, listed in
 `components/libpeer/README.md`.
 

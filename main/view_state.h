@@ -15,6 +15,18 @@
 
 #define VIEW_STATE_NAME_BYTES 64
 
+/** The phone's view, as the app's view tile steps through them. */
+typedef enum { VIEW_MODE_SKY, VIEW_MODE_EYEPIECE, VIEW_MODE_RING } view_mode_t;
+
+/** The app's `state` message. */
+typedef struct {
+    bool night;               // the app's night mode
+    bool solving;             // the app is plate solving
+    bool sensors_on;          // the phone's motion sensors steer the map
+    view_mode_t view_mode;    // the phone's view
+    float eyepiece_field_deg; // the eyepiece's true field; 0 until sent
+} view_state_app_t;
+
 typedef struct {
     bool has_view;                         // false until the first view after linking
     puck_view_msg_t view;
@@ -23,6 +35,8 @@ typedef struct {
     char target_name[VIEW_STATE_NAME_BYTES]; // UTF-8, empty when there is no target
     bool night;                            // the app's night mode
     bool solving;                          // the app is plate solving
+    bool sensors_on;                       // the phone's motion sensors are on
+    view_mode_t view_mode;                 // the phone's view
     float eyepiece_field_deg;              // the eyepiece's true field; 0 until sent
 } view_state_t;
 
@@ -32,8 +46,8 @@ void view_state_set_view(const puck_view_msg_t *view);
 /** The target's name, or "" for none. Cut to fit, on a whole UTF-8 character. */
 void view_state_set_target(const char *name);
 
-/** The app's state message: night mode, plate solving, the eyepiece's true field. */
-void view_state_set_app_state(bool night, bool solving, float eyepiece_field_deg);
+/** The app's state message. */
+void view_state_set_app_state(const view_state_app_t *app);
 
 /** Forgets the view, target and state, as when the link is lost. */
 void view_state_clear(void);

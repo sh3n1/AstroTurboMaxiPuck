@@ -187,6 +187,13 @@ static inline bool sky_project(const sky_frame_t *f, const float j2000[3], float
     return sky_project_local(f, local, px, py);
 }
 
+/** On target: within half the eyepiece's true field, as the app's isOnTarget; never while
+ *  that field isn't known (0) or there is no target. */
+static inline bool sky_on_target(const puck_view_msg_t *v, float eyepiece_field_deg)
+{
+    return eyepiece_field_deg > 0 && !isnan(v->target_dist_deg) && v->target_dist_deg < eyepiece_field_deg / 2;
+}
+
 /** Radius on screen, in pixels, of something this many degrees across. */
 static inline float sky_radius_px(const sky_frame_t *f, float diameter_deg)
 {

@@ -275,7 +275,7 @@ void sky_draw_frame(const puck_view_msg_t *view, bool night, float eyepiece_fiel
         t = step_done(STEP_STARS, t);
         draw_moving(&f, night);
         t = step_done(STEP_MOVING, t);
-        sky_objects_draw(&f, night, moving, moving_count);
+        sky_objects_draw(&f, night, eyepiece_field_deg, moving, moving_count);
         t = step_done(STEP_TOP, t);
         sky_labels_draw();
         // The eyepiece view: black outside its circle, over everything, as the app draws it

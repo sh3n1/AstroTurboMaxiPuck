@@ -3,13 +3,11 @@
 //
 // AstroTurboMaxiPuck firmware entry point.
 //
-// For now a bring-up check of the board: it logs the chip, flash and PSRAM, then tests the
-// screen (red, green and blue, then the app's sky colour with its three reticle rings), logs
-// touches, and joins the Wi-Fi, showing the puck's address on screen. Then it shows a QR
-// code for the app to pair with, and once linked, what the app's view says: where the
-// telescope points (Alt, Az), the field of view (the rings follow it), and the target.
-// Taps send the app commands: the reticle plate solves, the edges step through the list,
-// and a long press switches night mode, which the screen follows.
+// It logs the chip, flash and PSRAM, tests the screen's colours (red, green, blue), joins the
+// Wi-Fi, showing the puck's address, then shows a QR code for the app to pair with. Once
+// linked, the sky map follows the app's view, with the main screen over it (screen.c). A tap
+// on the reticle plate solves; the menu's Night switches night mode, on the phone too; the
+// screen follows the app's night mode.
 
 #include <inttypes.h>
 #include <math.h>
@@ -17,6 +15,7 @@
 #include <string.h>
 
 #include "board.h"
+#include "brightness.h"
 #include "catalog.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
@@ -28,68 +27,48 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "link.h"
+#include "log_history.h"
+#include "qr_view.h"
+#include "menu.h"
+#include "screen.h"
+#include "screenshot.h"
 #include "sky_draw.h"
 #include "view_glide.h"
 #include "view_state.h"
 #include "wifi.h"
 #include "zoom.h"
+#include "align.h"
 
 static const char *TAG = "puck";
 
 // The app's colours (src/app/core/theme.ts and sky-map/sky-style.ts in the app).
 #define COLOR_SKY 0x05070F
-#define COLOR_RETICLE 0xE5484D
 #define COLOR_TEXT 0xE8EBF5
 // Night mode: full-strength red on black, no grey (the app's AGENTS.md).
 #define COLOR_NIGHT 0xFF0000
 #define COLOR_NIGHT_SKY 0x000000
-
-// Touch zones of the test screen, until the real layout (docs/screen-layout.md): a tap
-// within this distance of the centre plate solves; one within this distance of the left or
-// right edge steps through the list playing on the phone. A long press switches night mode.
-#define SOLVE_TAP_RADIUS_PX 110
-#define STEP_TAP_EDGE_PX 120
-// Until the menu is built (task 19), a tap near the top edge, where Alt and Az are, opens the
-// zoom's buttons, as the menu's Zoom will.
-#define ZOOM_TAP_TOP_PX 120
 
 // The Wi-Fi and link status lines, near the bottom of the screen.
 static lv_obj_t *status_label;
 static lv_obj_t *link_label;
 // The pairing QR code, in the middle, shown until the app links.
 static lv_obj_t *pairing_qr;
-// Where the telescope points and the field of view, near the top, once linked.
-static lv_obj_t *pose_label;
-static lv_obj_t *fov_label;
-// The target's name and how far it is, above the status lines.
-static lv_obj_t *target_label;
-// The previous and next arrows, at the left and right edges.
-static lv_obj_t *previous_label;
-static lv_obj_t *next_label;
 
-// The QR code's size: it fits well inside the round screen, with big enough squares for a
-// phone camera at arm's length.
-#define QR_SIZE_PX 280
+// The QR code's size, quiet zone included: as big as fits inside the round screen with the
+// status lines under it, for big squares a phone camera reads at arm's length.
+#define QR_SIZE_PX 300
+#define QR_RAISE_PX (-30)
 // While the QR code shows, the screen's brightness beats slowly between these, so a phone
 // camera dazzled by the bright white AMOLED gets a darker moment in every beat to read it.
 #define QR_BEAT_PERIOD_MS 6000
 #define QR_BEAT_DIM 50     // of 255
 #define QR_BEAT_BRIGHT 255
 #define QR_BEAT_STEP_MS 50
-// The screen's brightness otherwise (Settings, Brightness, will set it: task 21).
-#define NORMAL_BRIGHTNESS 255
 
-// The app's reticle: three plain rings, 0.5Â°, 2Â° and 4Â° across (the app's RETICLE_RINGS_DEG
-// are diameters). Until the app sends its field of view, the puck's diameter shows 10Â°.
-#define TEST_FOV_DEG 10.0f
-static const float RETICLE_DIAMETERS_DEG[] = {0.5f, 2.0f, 4.0f};
-#define RING_COUNT (sizeof(RETICLE_DIAMETERS_DEG) / sizeof(RETICLE_DIAMETERS_DEG[0]))
-static lv_obj_t *rings[RING_COUNT];
 // How often the screen looks at the shared view state.
 #define VIEW_REFRESH_MS 33
 // The longest step a glide takes in one frame, in ms of time elapsed.
 #define GLIDE_MAX_STEP_MS 100.0f
-#define DEG_TO_RAD 0.017453292f
 
 // Print the chip, flash and PSRAM details once at start-up.
 static void log_board_info(void)
@@ -118,83 +97,47 @@ static void fill_screen(uint32_t color)
     lvgl_port_unlock();
 }
 
-// A short tap: plate solve on the reticle, step at the edges (docs/puck.md, "Control
-// messages"). Runs in the LVGL task; the link sends the command from its own task.
+// A short tap on the reticle plate solves (docs/puck.md, "Control messages"); anywhere else
+// on the map it shows the bottom third, whose buttons take their own taps (screen.c). Runs in the LVGL task; the link sends the
+// command from its own task.
 static void on_tap(lv_event_t *event)
 {
     lv_point_t point;
     lv_indev_get_point(lv_indev_active(), &point);
-    const int dx = point.x - BOARD_SCREEN_PX / 2;
-    const int dy = point.y - BOARD_SCREEN_PX / 2;
     ESP_LOGI(TAG, "Tap at %d, %d", (int)point.x, (int)point.y);
 
     view_state_t state;
     view_state_get(&state);
-    // While zooming, only the zoom's own buttons do anything.
-    if (zoom_active()) return;
-    if (point.y < ZOOM_TAP_TOP_PX) {
-        if (state.has_view && !(state.view.flags & PUCK_VIEW_FLAG_EYEPIECE)) zoom_open();
-    } else if (dx * dx + dy * dy < SOLVE_TAP_RADIUS_PX * SOLVE_TAP_RADIUS_PX) {
+    // While zooming or aligning, only their own buttons do anything.
+    if (!state.has_view || zoom_active() || align_active() || menu_active()) return;
+    if (screen_is_reticle(point.x, point.y)) {
         if (!state.solving) link_send_command("{\"t\":\"solveNow\",\"trigger\":\"tap\"}");
-    } else if (point.x < STEP_TAP_EDGE_PX) {
-        link_send_command("{\"t\":\"step\",\"by\":-1}");
-    } else if (point.x > BOARD_SCREEN_PX - STEP_TAP_EDGE_PX) {
-        link_send_command("{\"t\":\"step\",\"by\":1}");
+    } else {
+        screen_touched(); // anywhere else on the map: the bottom third shows
     }
 }
 
-// A long press anywhere: night mode on or off, on the phone too.
-static void on_long_press(lv_event_t *event)
+// Night mode on or off, on the phone too (the menu's Night): the app answers with its state,
+// which recolours the screen.
+static void switch_night(void)
 {
     view_state_t state;
     view_state_get(&state);
     link_send_command(state.night ? "{\"t\":\"night\",\"on\":false}" : "{\"t\":\"night\",\"on\":true}");
 }
 
-// Every text and ring in the day's colours, or night's full-strength red.
+
+// Everything in the day's colours, or night's full-strength red.
 static void apply_palette(bool night)
 {
     const lv_color_t text = lv_color_hex(night ? COLOR_NIGHT : COLOR_TEXT);
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(night ? COLOR_NIGHT_SKY : COLOR_SKY), 0);
-    lv_obj_t *labels[] = {status_label, link_label, target_label, pose_label, fov_label,
-                          previous_label, next_label};
-    for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) {
-        lv_obj_set_style_text_color(labels[i], text, 0);
-    }
-    for (size_t i = 0; i < RING_COUNT; i++) {
-        lv_obj_set_style_border_color(rings[i], lv_color_hex(night ? COLOR_NIGHT : COLOR_RETICLE), 0);
-    }
+    lv_obj_set_style_text_color(status_label, text, 0);
+    lv_obj_set_style_text_color(link_label, text, 0);
+    screen_set_night(night);
     zoom_set_night(night);
-}
-
-// One plain ring, centred on the screen.
-static lv_obj_t *make_ring(lv_obj_t *screen)
-{
-    lv_obj_t *ring = lv_obj_create(screen);
-    lv_obj_remove_style_all(ring);
-    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(ring, 3, 0);
-    lv_obj_set_style_border_color(ring, lv_color_hex(COLOR_RETICLE), 0);
-    lv_obj_set_clickable(ring, false); // touches go to the screen behind
-    return ring;
-}
-
-// Sizes the rings for a field of view, with the app's stereographic projection
-// (docs/puck.md, "Drawing on the puck"): a ring d across has radius 2 tan(d / 4) x scale.
-// Rings bigger than the screen, or too small to see, are hidden. ring_deg: in the app's ring
-// view, the one ring, the eyepiece's field, instead of the three; 0 otherwise.
-static void size_rings(float fov_deg, float ring_deg)
-{
-    const float radius_px = BOARD_SCREEN_PX / 2.0f;
-    const float scale = radius_px / (2.0f * tanf(fov_deg / 4.0f * DEG_TO_RAD));
-    for (size_t i = 0; i < RING_COUNT; i++) {
-        float diameter = ring_deg > 0 ? ring_deg : RETICLE_DIAMETERS_DEG[i];
-        int r = (int)(2.0f * tanf(diameter / 4.0f * DEG_TO_RAD) * scale);
-        bool shown = ring_deg > 0 ? i == 0 : true;
-        lv_obj_set_hidden(rings[i], !shown || r < 2 || r > radius_px);
-        lv_obj_set_size(rings[i], r * 2, r * 2);
-        lv_obj_center(rings[i]);
-    }
+    align_set_night(night);
+    menu_set_night(night);
 }
 
 // A line of status text, centred, this far from the bottom. Big text: the puck is read at
@@ -215,7 +158,7 @@ static void refresh_view(lv_timer_t *timer)
 {
     static uint32_t shown_count;
     static char shown_target[VIEW_STATE_NAME_BYTES];
-    static bool shown_view, shown_night, shown_solving;
+    static bool shown_view, shown_night;
     view_state_t state;
     view_state_get(&state);
     bool night_changed = state.night != shown_night;
@@ -223,13 +166,17 @@ static void refresh_view(lv_timer_t *timer)
         shown_night = state.night;
         apply_palette(state.night);
     }
-    if (state.solving != shown_solving) {
-        // Plate solving: the rings dim until it ends (task 12 makes them pulse, as the app).
-        shown_solving = state.solving;
-        for (size_t i = 0; i < RING_COUNT; i++) {
-            lv_obj_set_style_border_opa(rings[i], state.solving ? LV_OPA_40 : LV_OPA_COVER, 0);
-        }
+    // Plate solving: the reticle pulses until it ends, as the app's.
+    screen_tick(state.solving);
+    menu_show_state(&state);
+    align_update();
+    // The menu covers the map, which waits; it closes when the link goes (once: it can still
+    // be opened over the cable for a screenshot, screenshot.c).
+    if (!state.has_view && shown_view) {
+        menu_close();
+        align_close();
     }
+    if (menu_active()) return;
     static uint32_t shown_zoom;
     // The view on the screen, gliding towards the newest (view_glide.c), and while it moves.
     static puck_view_msg_t glided;
@@ -243,15 +190,12 @@ static void refresh_view(lv_timer_t *timer)
     shown_count = state.view_count;
     shown_zoom = zoom_revision();
     strcpy(shown_target, state.target_name);
-    // The arrows make way for the zoom's âˆ’ and + while it shows.
-    lv_obj_set_hidden(previous_label, !state.has_view || zoom_active());
-    lv_obj_set_hidden(next_label, !state.has_view || zoom_active());
+    // The Wi-Fi and link lines show until the first view, where the bottom third goes.
+    lv_obj_set_hidden(status_label, state.has_view);
+    lv_obj_set_hidden(link_label, state.has_view);
 
     if (!state.has_view) {
-        lv_label_set_text(pose_label, "");
-        lv_label_set_text(fov_label, "");
-        lv_label_set_text(target_label, "");
-        size_rings(TEST_FOV_DEG, 0);
+        screen_hide();
         sky_draw_clear(state.night);
         glided.type = 0; // the next view is shown at once
         gliding = false;
@@ -268,33 +212,16 @@ static void refresh_view(lv_timer_t *timer)
     gliding = view_glide_step(&glided, &newest, elapsed_ms);
     const puck_view_msg_t *v = &glided;
     sky_draw_frame(v, state.night, state.eyepiece_field_deg);
-    char text[96];
-    snprintf(text, sizeof(text), "Alt %.1fÂ°  Az %.1fÂ°", v->alt_deg, v->az_deg);
-    lv_label_set_text(pose_label, text);
-    snprintf(text, sizeof(text), "FOV %.1fÂ°", v->fov_deg);
-    lv_label_set_text(fov_label, text);
-    if (isnan(v->target_dist_deg)) {
-        lv_label_set_text(target_label, state.target_name);
-    } else {
-        snprintf(text, sizeof(text), "%s %.1fÂ°", state.target_name, v->target_dist_deg);
-        lv_label_set_text(target_label, text);
-    }
-    // The app's ring view: one ring, the eyepiece's field (view flag bit 3).
-    float ring_deg = (v->flags & PUCK_VIEW_FLAG_RING) ? state.eyepiece_field_deg : 0;
-    if (v->fov_deg > 0 && v->fov_deg < 360) size_rings(v->fov_deg, ring_deg);
-    // The eyepiece view has no reticle, as the app's: its circle is drawn with the sky.
-    if (v->flags & PUCK_VIEW_FLAG_EYEPIECE) {
-        for (size_t i = 0; i < RING_COUNT; i++) lv_obj_set_hidden(rings[i], true);
-    }
+    screen_show(v, state.target_name, state.eyepiece_field_deg);
 }
 
 // The QR code's slow heartbeat. An LVGL timer, so it runs in the LVGL task, which also
 // sends the screen its pixels: the brightness command never crosses a frame being sent.
 static void beat_qr(lv_timer_t *timer)
 {
-    static int shown = NORMAL_BRIGHTNESS;
-    int level = NORMAL_BRIGHTNESS;
-    if (!lv_obj_is_hidden(pairing_qr)) {
+    static int shown = -1;
+    int level = brightness_level(); // the menu's Settings, Brightness
+    if (pairing_qr && !lv_obj_is_hidden(pairing_qr)) {
         // A smooth swell from dim to bright and back, once a period.
         float phase = (float)(lv_tick_get() % QR_BEAT_PERIOD_MS) / QR_BEAT_PERIOD_MS;
         float swell = 0.5f - 0.5f * cosf(2 * (float)M_PI * phase);
@@ -306,46 +233,29 @@ static void beat_qr(lv_timer_t *timer)
     }
 }
 
-static void draw_test_screen(void)
+static void build_screen(void)
 {
     lvgl_port_lock(0);
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(COLOR_SKY), 0);
     lv_obj_set_scrollable(screen, false);
-    // The sky map first, so the rings, labels and QR code are drawn over it.
+    // The sky map first, so the main screen and QR code are drawn over it.
     sky_draw_create(screen);
-    for (size_t i = 0; i < RING_COUNT; i++) rings[i] = make_ring(screen);
-    size_rings(TEST_FOV_DEG, 0);
+    screen_create(screen);
     lv_obj_add_event_cb(screen, on_tap, LV_EVENT_SHORT_CLICKED, NULL);
-    lv_obj_add_event_cb(screen, on_long_press, LV_EVENT_LONG_PRESSED, NULL);
 
     status_label = make_status_label(screen, -40);
     link_label = make_status_label(screen, -75);
-    target_label = make_status_label(screen, -115);
-    pose_label = make_status_label(screen, 0);
-    lv_obj_align(pose_label, LV_ALIGN_TOP_MID, 0, 50);
-    fov_label = make_status_label(screen, 0);
-    lv_obj_align(fov_label, LV_ALIGN_TOP_MID, 0, 88);
-    previous_label = make_status_label(screen, 0);
-    lv_label_set_text(previous_label, LV_SYMBOL_LEFT);
-    lv_obj_align(previous_label, LV_ALIGN_LEFT_MID, 30, 0);
-    next_label = make_status_label(screen, 0);
-    lv_label_set_text(next_label, LV_SYMBOL_RIGHT);
-    lv_obj_align(next_label, LV_ALIGN_RIGHT_MID, -30, 0);
-    lv_obj_set_hidden(previous_label, true);
-    lv_obj_set_hidden(next_label, true);
     zoom_create(screen);
+    align_create(screen);
     lv_timer_create(refresh_view, VIEW_REFRESH_MS, NULL);
 
-    // Dark squares on white, as cameras read best, with the quiet zone around it.
-    pairing_qr = lv_qrcode_create(screen);
-    lv_qrcode_set_size(pairing_qr, QR_SIZE_PX);
-    lv_qrcode_set_dark_color(pairing_qr, lv_color_black());
-    lv_qrcode_set_light_color(pairing_qr, lv_color_white());
-    lv_qrcode_set_quiet_zone(pairing_qr, true);
-    lv_obj_center(pairing_qr);
-    lv_obj_set_hidden(pairing_qr, true);
+    // Dark squares on white, as cameras read best, with the quiet zone around it (qr_view.c).
+    // A little above the centre, clear of the status lines under it.
+    pairing_qr = qr_view_create(screen, QR_SIZE_PX);
+    if (pairing_qr) lv_obj_align(pairing_qr, LV_ALIGN_CENTER, 0, QR_RAISE_PX);
     lv_timer_create(beat_qr, QR_BEAT_STEP_MS, NULL);
+    menu_create(screen, switch_night); // last: over everything, the QR code too
     lvgl_port_unlock();
 }
 
@@ -353,9 +263,8 @@ static void draw_test_screen(void)
 static void show_pairing(const char *qr_text, bool after_loss)
 {
     lvgl_port_lock(0);
-    lv_qrcode_update(pairing_qr, qr_text, strlen(qr_text));
-    lv_obj_set_hidden(pairing_qr, false);
-    lv_label_set_text(link_label, after_loss ? "Link lost: scan again" : "Scan in the app");
+    if (pairing_qr && qr_view_show(qr_text)) lv_obj_set_hidden(pairing_qr, false);
+    lv_label_set_text(link_label, after_loss ? "Link lost: reconnect" : "Scan in the app");
     lvgl_port_unlock();
 }
 
@@ -363,7 +272,7 @@ static void show_link_state(const char *text)
 {
     lvgl_port_lock(0);
     lv_label_set_text(link_label, text);
-    if (strcmp(text, "Linked") == 0) lv_obj_set_hidden(pairing_qr, true);
+    if (strcmp(text, "Linked") == 0 && pairing_qr) lv_obj_set_hidden(pairing_qr, true);
     lvgl_port_unlock();
 }
 
@@ -396,6 +305,7 @@ static void on_wifi_change(wifi_state_t state, const char *ip)
 
 void app_main(void)
 {
+    log_history_start();
     // After a reset the board's USB port takes about a second to reconnect to the computer,
     // and anything logged before that is lost. Wait, so the monitor sees the board info.
     vTaskDelay(pdMS_TO_TICKS(2000));
@@ -416,10 +326,12 @@ void app_main(void)
         fill_screen(test_colors[i]);
         vTaskDelay(pdMS_TO_TICKS(500));
     }
-    draw_test_screen();
-    ESP_LOGI(TAG, "Test screen drawn: touch it to log the position");
+    build_screen();
+    screenshot_start();
 
     if (wifi_start(on_wifi_change) != ESP_OK) {
         on_wifi_change(WIFI_NOT_SET, "");
     }
+    // Kept in NVS, which wifi_start makes ready.
+    brightness_load();
 }

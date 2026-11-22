@@ -9,11 +9,12 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "fonts.h"
 #include "sky_pixels.h"
 
 static const char *TAG = "labels";
 
-#define LABEL_FONT (&lv_font_montserrat_20)
+#define LABEL_FONT (&noto_sans_20) // with Greek, for star names
 // As many labels a frame as fit without overlapping, up to this many.
 #define MAX_LABELS 48
 // The dark backing behind each label, so it stays readable over lines and stars, as the

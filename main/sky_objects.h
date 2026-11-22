@@ -24,6 +24,7 @@ void sky_objects_load(const uint8_t *catalog, size_t bytes);
 void sky_draw_chevrons(float x, float y, float angle, float distance_deg, bool night);
 
 /** Draws the top layer into the canvas's pixels, and places its labels, which
- *  sky_labels_draw() draws after. moving: the Moon and planets, for their labels. */
-void sky_objects_draw(const sky_frame_t *f, bool night,
+ *  sky_labels_draw() draws after. eyepiece_field_deg: the eyepiece's true field (0 until
+ *  known), for when the target is reached. moving: the Moon and planets, for their labels. */
+void sky_objects_draw(const sky_frame_t *f, bool night, float eyepiece_field_deg,
                       const moving_object_t *moving, size_t moving_count);
