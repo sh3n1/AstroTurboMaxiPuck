@@ -122,7 +122,7 @@ cable: `tools/screenshot.py`; the log's last 20 minutes: `tools/puck_log.py`.*
       phase, turned towards the Sun; dashed size circles; the eyepiece's circle and the dark
       mask around it (the app's `state` now sends `eyepieceFieldDeg`); the selected target's
       green crosshair, placed from the `view`'s distance and direction.
-    - *Built 2026-11-22, to test on the board:* the planets' own icons (Mercury, Mars,
+    - *Built 2026-11-22, tested:* the planets' own icons (Mercury, Mars,
       Jupiter, Saturn, Uranus, Neptune, Pluto, Ceres, the asteroids), sent by the app
       flattened into lines (`icon`, the app's `puck-icons.ts`; `main/sky_icons.c`); the
       selected target's label first and in full below the horizon, its size circle in its
@@ -164,28 +164,31 @@ Material Symbols icons, and what each item does.
     the user's lists, Messier and Caldwell; only the targets above the horizon, up to 60.
     The pages are in `main/menu_lists.c`, built a few chips at a time (60 at once held the
     screen for a second); LVGL has 512 KB more in PSRAM (`main/board.c`), as 60 chips
-    overflowed its 64 KB and restarted the puck. *Also built 2026-11-22, to test:* each
+    overflowed its 64 KB and restarted the puck. *Also built 2026-11-22, tested:* each
     target as the phone's rows, with its icon (the app's own drawn from `icon` messages, or
     the closest Material Symbol) and its height and direction badge ("42° SE").
 22d. **Alignment**, guided as the app's: the easiest bright star or the target, guidance,
-    "Align" when centred, and "Remove alignment". *Built 2026-11-22, to test on the board:*
+    "Align" when centred, and "Remove alignment". *Built 2026-11-22, tested:*
     the `alignStars`, `alignChoose`, `alignNow`, `alignRemove` and `alignStatus` messages
     (the app's `docs/puck.md`, "Alignment", `puck-align.service.ts`); the page in
     `main/menu_lists.c`, ✗ and Align over the map in `main/align.c`.
 23. **Settings → Wi-Fi → Client**: the puck's own network for a moment, a QR code to join
     it, and a setup web page (ESP-IDF's `esp_http_server`) listing the networks seen and
     taking the password, kept in NVS. Also at start-up with no network saved or found.
-    *Built 2026-11-22, to test on the board* (`main/wifi.c`, `main/wifi_setup.c`): the chip
+    *Tested on the board 2026-11-22* (`main/wifi.c`, `main/wifi_setup.c`): the page is a
+    captive portal (a DNS answering every name with the puck, other addresses sent to the
+    page, DHCP option 114), so the phone opens it by itself and stays on a network with no
+    internet; the password has a Show button. The chip
     restarts into setup; a saved network not joined in a minute opens it too, and setup with
     no phone for 5 minutes goes back to the saved network. menuconfig's network is only the
     fallback now. Up to 5 networks kept (`main/wifi_networks.c`); the puck scans and joins
     the strongest in range, and rescans after losing it.
 24. **Settings → Wi-Fi → AP**: a switch; the puck's own network, a Wi-Fi QR code to join
-    it, then the pairing QR. Depends on 23. *Built 2026-11-22, to test on the board:*
+    it, then the pairing QR. Depends on 23. *Built 2026-11-22, tested:*
     "AstroPuck-XXXX", its password made once and kept in NVS; the switch restarts the puck.
 25. **Settings → Meade LX200 Repeater**: a switch; LX200 over TCP port 4030: where the telescope
     points, for Stellarium or SkySafari, and their GoTo becomes the target. *Built
-    2026-11-22, to test on the board* (`main/lx200.c`; the app's `puck-lx200.ts`, docs/puck.md
+    2026-11-22, tested* (`main/lx200.c`; the app's `puck-lx200.ts`, docs/puck.md
     "LX200"): `:GR#`, `:GD#` (both precisions), `:Sr`, `:Sd`, `:MS#`, and harmless answers to
     the site and version questions. The phone sends the pointing of the date once a second
     while it's on, and makes the nearest object within 2° the target on a GoTo. Set the
@@ -203,7 +206,9 @@ Material Symbols icons, and what each item does.
 - **Start-up screen.** *Done 2026-11-22, tested.* The colour test is gone; the app's logo
   floats in the middle over the landing page's twinkling stars and shooting star
   (`main/splash.c`, the logo made by `tools/make_logo.py`), until the first QR code. The
-  saved brightness applies from the start. Still there: the 2 s wait at start-up for a
+  saved brightness applies from the start. No white flash at start-up (2026-11-22,
+  tested): the panel starts off at brightness 0 (Waveshare's commands switched it on at
+  full brightness over whatever its memory held), and comes on after LVGL's first frame. Still there: the 2 s wait at start-up for a
   cable monitor (the log history keeps those lines anyway).
 - **ICE credentials from the hardware random generator.** *Done 2026-11-21, to test on
   the board.* libpeer seeded them from the clock, which the puck doesn't have, so someone on

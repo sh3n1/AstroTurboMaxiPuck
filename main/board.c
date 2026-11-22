@@ -58,7 +58,10 @@ static const char *TAG = "board";
 // The CO5300 brightness command (0x51), wrapped the way the QSPI panel IO expects a command.
 #define LCD_CMD_BRIGHTNESS ((0x02 << 24) | (0x51 << 8))
 
-// Start-up commands for this panel, from Waveshare's board package.
+// Start-up commands for this panel, from Waveshare's board package, but dark: at zero
+// brightness, and without "display on" (0x29), which board_screen_on sends once the first
+// frame is drawn. Switched on at once at full brightness, the panel showed whatever its
+// memory held, often white: a flash that ruins night vision.
 static const co5300_lcd_init_cmd_t lcd_init_cmds[] = {
     {0xFE, (uint8_t[]){0x20}, 1, 0},
     {0x19, (uint8_t[]){0x10}, 1, 0},
@@ -68,12 +71,11 @@ static const co5300_lcd_init_cmd_t lcd_init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0}, // 16 bits a pixel
     {0x35, (uint8_t[]){0x00}, 1, 0}, // tearing signal on
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0}, // full brightness
+    {0x51, (uint8_t[]){0x00}, 1, 0}, // brightness 0 until the first frame (main.c)
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x06, 0x01, 0xD7}, 4, 0},   // columns 6 to 471
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xD1}, 4, 600}, // rows 0 to 465
     {0x11, NULL, 0, 600},                                // wake from sleep
-    {0x29, NULL, 0, 0},                                  // display on
 };
 
 static esp_lcd_panel_io_handle_t lcd_io;
@@ -114,6 +116,12 @@ static esp_err_t start_screen(void)
     ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(lcd_panel, LCD_COLUMN_OFFSET, 0), TAG, "gap");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(lcd_panel), TAG, "reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(lcd_panel), TAG, "init");
+    // esp_lcd_panel_init switches the display on: off again until the first frame.
+    return esp_lcd_panel_disp_on_off(lcd_panel, false);
+}
+
+esp_err_t board_screen_on(void)
+{
     return esp_lcd_panel_disp_on_off(lcd_panel, true);
 }
 
@@ -225,6 +233,11 @@ lv_display_t *board_start(void)
     };
     lv_display_t *display = lvgl_port_add_disp(&display_config);
     if (!display) return NULL;
+    // LVGL's default theme starts white: black instead, should a frame go out early.
+    if (lvgl_port_lock(0)) {
+        lv_obj_set_style_bg_color(lv_screen_active(), lv_color_black(), 0);
+        lvgl_port_unlock();
+    }
 
     // Without touch the screen still works, so this is logged rather than fatal.
     if (start_touch(&touch) == ESP_OK) {

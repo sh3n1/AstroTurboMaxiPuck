@@ -210,11 +210,24 @@ static void refresh_view(lv_timer_t *timer)
     screen_show(v, state.target_name, state.eyepiece_field_deg);
 }
 
+// The panel starts off and dark (board.c), so nothing shows before the start-up screen,
+// not even the white its memory may hold: on, once LVGL has drawn and sent its first frame,
+// in the LVGL task. The brightness rises after, from beat_qr's next step.
+static bool screen_on;
+
+static void on_first_frame(lv_event_t *event)
+{
+    if (screen_on) return;
+    screen_on = true;
+    board_screen_on();
+}
+
 // The QR code's slow heartbeat. An LVGL timer, so it runs in the LVGL task, which also
 // sends the screen its pixels: the brightness command never crosses a frame being sent.
 static void beat_qr(lv_timer_t *timer)
 {
     static int shown = -1;
+    if (!screen_on) return; // dark until the first frame is on the screen
     int level = brightness_level(); // the menu's Settings, Brightness
     if (pairing_qr && !lv_obj_is_hidden(pairing_qr)) {
         // A smooth swell from dim to bright and back, once a period.
@@ -253,6 +266,8 @@ static void build_screen(void)
     if (pairing_qr) lv_obj_align(pairing_qr, LV_ALIGN_CENTER, 0, QR_RAISE_PX);
     lv_timer_create(beat_qr, QR_BEAT_STEP_MS, NULL);
     menu_create(screen, switch_night); // last: over everything, the QR code too
+    // The display on once LVGL has drawn and sent this screen (on_first_frame).
+    lv_display_add_event_cb(lv_display_get_default(), on_first_frame, LV_EVENT_REFR_READY, NULL);
     lvgl_port_unlock();
 }
 

@@ -20,3 +20,7 @@ lv_display_t *board_start(void);
 
 /** Sets the screen brightness, from 0 (off) to 255 (full). */
 esp_err_t board_set_brightness(uint8_t level);
+
+/** Switches the display on. It starts off and dark, so nothing shows before the first frame:
+ *  call once LVGL has drawn and sent it (main.c, on_first_frame). The brightness is still 0. */
+esp_err_t board_screen_on(void);
