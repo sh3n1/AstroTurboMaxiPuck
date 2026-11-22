@@ -78,7 +78,8 @@ app's "Two phones" mode.
    puck's answer itself, and a secret from the QR in the first message replaces the DTLS
    fingerprint check. Not Espressif's `esp_peer` (closed library, Espressif-only licence). The
    puck **joins the user's Wi-Fi** (station mode), not its own access point; the Wi-Fi name
-   and password go in `sdkconfig` (menuconfig), never in git. Options as first discussed:
+   and password are chosen on the puck's setup page and kept in its NVS (2026-11-22); `sdkconfig`'s
+   (menuconfig) are only the fallback for development, never in git. Options as first discussed:
    - **WebRTC over Wi-Fi**, as the app's Two phones mode does (see below). Works with iPhones
      too. Needs a shared network: the ESP32's own access point, or the phone's hotspot. The ESP32
      has no camera, so pairing is one-way: the puck shows a QR code with its IP address, ICE

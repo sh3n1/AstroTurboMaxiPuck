@@ -259,13 +259,44 @@ static void build_screen(void)
     lvgl_port_unlock();
 }
 
+// The pairing code last made, and whether another QR code shows instead: the one that joins
+// the puck's own network, until a phone is on it. Both under LVGL's lock, as the link task
+// and the Wi-Fi's write them.
+static char pairing_text[160];
+static bool pairing_after_loss;
+static bool pairing_held;
+
+// With LVGL locked.
+static void show_qr(const char *text)
+{
+    if (pairing_qr && qr_view_show(text)) lv_obj_set_hidden(pairing_qr, false);
+}
+
+static void show_pairing_now(void)
+{
+    if (!pairing_text[0]) return;
+    show_qr(pairing_text);
+    lv_label_set_text(link_label, pairing_after_loss ? "Link lost: reconnect" : "Scan in the app");
+}
+
 // The link's callbacks (link.h), run in the link task.
 static void show_pairing(const char *qr_text, bool after_loss)
 {
     lvgl_port_lock(0);
-    if (pairing_qr && qr_view_show(qr_text)) lv_obj_set_hidden(pairing_qr, false);
-    lv_label_set_text(link_label, after_loss ? "Link lost: reconnect" : "Scan in the app");
+    strlcpy(pairing_text, qr_text, sizeof(pairing_text));
+    pairing_after_loss = after_loss;
+    if (!pairing_held) show_pairing_now();
     lvgl_port_unlock();
+}
+
+// The QR code that joins the puck's own network, with what to do in words. With LVGL locked.
+static void show_join_qr(const char *what)
+{
+    char text[96];
+    wifi_join_qr(text, sizeof(text));
+    show_qr(text);
+    lv_label_set_text(link_label, what);
+    lv_label_set_text(status_label, wifi_own_name());
 }
 
 static void show_link_state(const char *text)
@@ -276,11 +307,12 @@ static void show_link_state(const char *text)
     lvgl_port_unlock();
 }
 
-// Shows the Wi-Fi state on screen, and starts the link the first time it connects.
+// Shows the Wi-Fi state on screen, and starts the link the first time the puck has an
+// address: on the user's network, or its own. Before any link, in English.
 static void on_wifi_change(wifi_state_t state, const char *ip)
 {
     static bool link_started = false;
-    if (state == WIFI_CONNECTED && !link_started) {
+    if ((state == WIFI_CONNECTED || state == WIFI_OWN_WAITING) && !link_started) {
         static const link_callbacks_t callbacks = {
             .show_pairing = show_pairing,
             .show_state = show_link_state,
@@ -297,6 +329,25 @@ static void on_wifi_change(wifi_state_t state, const char *ip)
         lv_label_set_text(status_label, "Joining Wi-Fi...");
         break;
     case WIFI_CONNECTED:
+        lv_label_set_text(status_label, ip);
+        break;
+    case WIFI_OWN_WAITING:
+        // The phone joins the puck's network first; then the pairing code.
+        pairing_held = true;
+        show_join_qr("Join the puck's Wi-Fi");
+        break;
+    case WIFI_OWN_JOINED:
+        pairing_held = false;
+        lv_label_set_text(status_label, ip);
+        show_pairing_now();
+        break;
+    case WIFI_SETUP_WAITING:
+        show_join_qr("Wi-Fi setup: join it");
+        break;
+    case WIFI_SETUP_JOINED:
+        // The setup page, for the phone now on the puck's network.
+        show_qr("http://192.168.4.1/");
+        lv_label_set_text(link_label, "Open the page");
         lv_label_set_text(status_label, ip);
         break;
     }
