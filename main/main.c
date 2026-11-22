@@ -38,6 +38,9 @@
 #include "wifi.h"
 #include "zoom.h"
 #include "align.h"
+#include "lx200.h"
+#include "nvs_flash.h"
+#include "splash.h"
 
 static const char *TAG = "puck";
 
@@ -87,14 +90,6 @@ static void log_board_info(void)
     ESP_LOGI(TAG, "Free heap: internal %u KB, PSRAM %u KB",
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
-}
-
-// Fills the screen with one colour, for the colour test.
-static void fill_screen(uint32_t color)
-{
-    lvgl_port_lock(0);
-    lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(color), 0);
-    lvgl_port_unlock();
 }
 
 // A short tap on the reticle plate solves (docs/puck.md, "Control messages"); anywhere else
@@ -244,6 +239,8 @@ static void build_screen(void)
     screen_create(screen);
     lv_obj_add_event_cb(screen, on_tap, LV_EVENT_SHORT_CLICKED, NULL);
 
+    // The start-up screen over the map, under the status lines and the QR code.
+    splash_create(screen);
     status_label = make_status_label(screen, -40);
     link_label = make_status_label(screen, -75);
     zoom_create(screen);
@@ -270,6 +267,7 @@ static bool pairing_held;
 static void show_qr(const char *text)
 {
     if (pairing_qr && qr_view_show(text)) lv_obj_set_hidden(pairing_qr, false);
+    splash_hide(); // the start-up screen until the first QR code
 }
 
 static void show_pairing_now(void)
@@ -371,18 +369,15 @@ void app_main(void)
         return;
     }
 
-    // Colour test: red, green, blue, half a second each, to check the colour order.
-    const uint32_t test_colors[] = {0xFF0000, 0x00FF00, 0x0000FF};
-    for (size_t i = 0; i < 3; i++) {
-        fill_screen(test_colors[i]);
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
+    // The brightness kept in NVS before anything shows, so the start-up screen doesn't
+    // dazzle in the dark. wifi_start makes NVS ready too, and erases it if it must.
+    nvs_flash_init();
+    brightness_load();
     build_screen();
     screenshot_start();
 
     if (wifi_start(on_wifi_change) != ESP_OK) {
         on_wifi_change(WIFI_NOT_SET, "");
     }
-    // Kept in NVS, which wifi_start makes ready.
-    brightness_load();
+    lx200_start();
 }

@@ -51,6 +51,7 @@ static wifi_state_cb_t state_cb;
 static puck_wifi_mode_t mode;
 static TimerHandle_t retry_timer, give_up_timer, restart_timer;
 static bool ever_joined;
+static char address[16]; // the puck's IP address, "" until it has one
 static wifi_network_t fallback; // menuconfig's network, for development, after the kept ones
 static unsigned blind_tries;    // none seen: each tried in turn, as a hidden one isn't seen
 static char own_name[33];
@@ -113,6 +114,11 @@ void wifi_open_setup(void)
     keep_u8(KEY_SETUP, 1);
     ESP_LOGI(TAG, "Setup asked for: restarting");
     wifi_restart_soon();
+}
+
+const char *wifi_address(void)
+{
+    return address;
 }
 
 const char *wifi_own_name(void)
@@ -231,12 +237,14 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         if (mode != MODE_STATION) return; // setup only scans
         const wifi_event_sta_disconnected_t *event = data;
         ESP_LOGW(TAG, "Not connected (reason %d), trying again", event->reason);
+        address[0] = '\0';
         state_cb(WIFI_CONNECTING, "");
         xTimerStart(retry_timer, 0);
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *event = data;
         char ip[16];
         esp_ip4addr_ntoa(&event->ip_info.ip, ip, sizeof(ip));
+        strlcpy(address, ip, sizeof(address));
         ESP_LOGI(TAG, "Connected, address %s", ip);
         ever_joined = true;
         xTimerStop(give_up_timer, 0);
@@ -338,6 +346,7 @@ esp_err_t wifi_start(wifi_state_cb_t on_change)
     // No power saving: the link to the phone needs low latency more than battery.
     ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_NONE), TAG, "power save");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "start");
+    if (mode != MODE_STATION) strlcpy(address, OWN_IP, sizeof(address));
     if (mode == MODE_OWN) state_cb(WIFI_OWN_WAITING, OWN_IP);
     if (mode == MODE_SETUP) {
         ESP_RETURN_ON_ERROR(wifi_setup_start(), TAG, "setup page");

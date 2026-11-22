@@ -21,6 +21,7 @@
 #include "json_read.h"
 #include "align.h"
 #include "lists.h"
+#include "lx200.h"
 #include "sky_icons.h"
 #include "sky_objects.h"
 #include "moving.h"
@@ -244,6 +245,11 @@ static void on_control(const char *text)
     } else if (strstr(text, "\"t\":\"alignStatus\"")) {
         align_set_status(text);
     }
+    // Where the telescope points, for the LX200 repeater: {"t":"pointing","raDeg":..,"decDeg":..}
+    else if (strstr(text, "\"t\":\"pointing\"")) {
+        float ra, dec;
+        if (json_float(text, "raDeg", &ra) && json_float(text, "decDeg", &dec)) lx200_set_pointing(ra, dec);
+    }
     // A planet's icon: {"t":"icon","body":"Saturn","paths":[...]}
     else if (strstr(text, "\"t\":\"icon\"")) {
         sky_icons_parse(text);
@@ -335,6 +341,9 @@ static void send_hello(void)
              PUCK_PROTOCOL_VERSION, PUCK_SCREEN_PX, id ? "\"" : "", id ? id : "null", id ? "\"" : "");
     ESP_LOGI(TAG, "Sending %s", text);
     send_control(text);
+    // Whether the LX200 repeater is on, so the phone sends the pointing while it is (lx200.h).
+    static char lx200_on[] = "{\"t\":\"lx200\",\"on\":true}";
+    if (lx200_enabled()) send_control(lx200_on);
 }
 
 bool link_send_command(const char *json)

@@ -184,7 +184,12 @@ Material Symbols icons, and what each item does.
     it, then the pairing QR. Depends on 23. *Built 2026-11-22, to test on the board:*
     "AstroPuck-XXXX", its password made once and kept in NVS; the switch restarts the puck.
 25. **Settings → Meade LX200 Repeater**: a switch; LX200 over TCP port 4030: where the telescope
-    points, for Stellarium or SkySafari, and their GoTo becomes the target. Depends on 6, 19.
+    points, for Stellarium or SkySafari, and their GoTo becomes the target. *Built
+    2026-11-22, to test on the board* (`main/lx200.c`; the app's `puck-lx200.ts`, docs/puck.md
+    "LX200"): `:GR#`, `:GD#` (both precisions), `:Sr`, `:Sd`, `:MS#`, and harmless answers to
+    the site and version questions. The phone sends the pointing of the date once a second
+    while it's on, and makes the nearest object within 2° the target on a GoTo. Set the
+    planetarium to JNow. The chip shows the address to give it.
 
 ## 5. Power
 
@@ -195,6 +200,11 @@ Material Symbols icons, and what each item does.
 
 ## Improvements
 
+- **Start-up screen.** *Done 2026-11-22, tested.* The colour test is gone; the app's logo
+  floats in the middle over the landing page's twinkling stars and shooting star
+  (`main/splash.c`, the logo made by `tools/make_logo.py`), until the first QR code. The
+  saved brightness applies from the start. Still there: the 2 s wait at start-up for a
+  cable monitor (the log history keeps those lines anyway).
 - **ICE credentials from the hardware random generator.** *Done 2026-11-21, to test on
   the board.* libpeer seeded them from the clock, which the puck doesn't have, so someone on
   the same Wi-Fi could guess them and keep taking the pairing slot. Now `esp_random`.
