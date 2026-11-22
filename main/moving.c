@@ -36,6 +36,7 @@ static bool parse_item(const char *item, moving_object_t *o)
     if (!json_float(item, "raDeg", &ra) || !json_float(item, "decDeg", &dec)) return false;
     radec_vector(ra, dec, o->v);
     if (!json_string(item, "label", o->label, sizeof(o->label))) o->label[0] = '\0';
+    if (!json_string(item, "id", o->id, sizeof(o->id))) o->id[0] = '\0';
     json_uint(item, "kind", &kind);
     json_uint(item, "showBelowFieldDeg", &show_below);
     o->kind = kind > 255 ? 0 : (uint8_t)kind;

@@ -18,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "moving.h"
+#include "sky_icons.h"
 #include "sky_common.h"
 #include "sky_labels.h"
 #include "sky_objects.h"
@@ -41,6 +42,8 @@ static const float GRID_ALTITUDES_DEG[] = {30, 60};
 #define COLOR_MOON 0xE8EBF5
 // The Moon's kind number (docs/puck.md, "Kinds").
 #define KIND_MOON 10
+// A planet's icon disc, as the app's ICON_DISC_PX (7), in the puck's pixels.
+#define ICON_DISC_PX (7 * 1.5f)
 // The catalogue's layout (docs/puck.md, "Format").
 #define SECTION_LINES 2
 #define LINE_RECORD_BYTES 16
@@ -176,8 +179,10 @@ static void draw_lines(const sky_frame_t *f, bool night)
     }
 }
 
-// The Moon, planets and asteroids, over the stars: a disc of their real size, but never
-// smaller than a bright star, in the app's colour for the solar system.
+// The Moon, planets and asteroids, over the stars, in the app's colour for the solar system:
+// a phase for the Moon and Venus, turned to the Sun; the planets' own icons (sky_icons.c),
+// their disc never smaller than the app's 7 pixels; or else a disc of their real size, but
+// never smaller than a bright star.
 static void draw_moving(const sky_frame_t *f, bool night)
 {
     const float *sun = moving_sun;
@@ -194,7 +199,8 @@ static void draw_moving(const sky_frame_t *f, bool night)
         float alpha = below && f->fade_below ? SKY_BELOW_HORIZON_OPACITY : 1;
         uint32_t color = sky_for_night(moon ? COLOR_MOON : SKY_COLOR_SOLAR_SYSTEM, night);
         if (isnan(o->phase)) {
-            sky_disc(x, y, radius, color, alpha);
+            float icon_disc = fmaxf(ICON_DISC_PX, sky_radius_px(f, o->size_arcmin / 60));
+            if (!sky_icons_draw(o->id, x, y, icon_disc, color, alpha)) sky_disc(x, y, radius, color, alpha);
             continue;
         }
         // The lit side faces the Sun: the screen direction of a tiny step from the object

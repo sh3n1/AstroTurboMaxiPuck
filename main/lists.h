@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #define LISTS_MAX 24          // lists offered: the collections, the user's own, two catalogues
@@ -15,13 +16,22 @@
 #define LISTS_ID_BYTES 48     // a user list's id is a UUID (36 characters)
 #define LISTS_NAME_BYTES 64
 #define LISTS_SUB_BYTES 24
+#define LISTS_ICON_BYTES 20  // an icon's name: "Saturn", "Globular cluster"
+#define LISTS_BADGE_BYTES 16 // how high and which way: "42° SE"
 #define LISTS_ALIGN_MAX 6 // the selected target and the 4 easiest stars
 
-/** A list or a target: its id, its name, and the line under it (a count, a designation). */
+/**
+ * A list or a target: its id, its name, and the line under it (a count, a designation). A
+ * target also has, as a row of the phone's lists, its icon's name and how high it is and
+ * which way to face ("42° SE"), high enough to see well or not (the app's puck-lists.ts).
+ */
 typedef struct {
     char id[LISTS_ID_BYTES];
     char name[LISTS_NAME_BYTES];
     char sub[LISTS_SUB_BYTES];
+    char icon[LISTS_ICON_BYTES];   // "" for a list
+    char badge[LISTS_BADGE_BYTES]; // "" for a list
+    bool high;
 } lists_item_t;
 
 typedef struct {

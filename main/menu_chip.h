@@ -46,6 +46,16 @@ void chip_list_reset(lv_obj_t *list);
 /** Each chip fitted to the screen's circle where the column is: after adding chips to it. */
 void chip_list_fit(lv_obj_t *list);
 
+/**
+ * Draws the app's line icon by this name (sky_icons.h) in the chip's disc, in place of its
+ * font icon. False if the app sent none by that name: the font icon stays.
+ */
+bool chip_set_drawn_icon(const chip_t *chip, const char *name);
+
+/** How high a target is and which way to face ("42° SE"), on the chip's right, as the
+ *  phone's lists: green when high enough to see well, amber when low. */
+void chip_set_badge(const chip_t *chip, const char *text, bool high);
+
 /** A chip's state line and switch. */
 void chip_set_sub(const chip_t *chip, const char *text);
 void chip_set_on(const chip_t *chip, bool on);

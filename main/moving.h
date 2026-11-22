@@ -22,6 +22,7 @@ typedef struct {
     uint8_t kind;         // as in the catalogue (docs/puck.md, "Kinds")
     uint8_t show_below;   // shown when the field is under this many degrees; 255 always
     char label[MOVING_LABEL_BYTES]; // what the map writes beside it, UTF-8
+    char id[MOVING_LABEL_BYTES];    // the body, such as "Saturn": its icon's name (sky_icons.h)
 } moving_object_t;
 
 /** Reads an `objects` message and keeps what it holds. Returns how many objects. */

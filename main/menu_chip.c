@@ -10,6 +10,7 @@
 
 #include "board.h"
 #include "fonts.h"
+#include "sky_icons.h"
 
 // The day's colours, from the app's theme (theme.ts): its dark sky, a dark blue tint for the
 // chips, its light blue as the accent.
@@ -45,16 +46,27 @@
 #define LEVEL_BAR_WIDTH_PX 280
 #define LEVEL_BAR_HEIGHT_PX 24
 #define LEVEL_BAR_TOUCH_PX 24 // taken as on the bar this far around it, for fingers
+// The app's line icons in a chip's disc: as big as the font's icons (32), their disc 7 of the
+// 24 grid, with lines 2.5 wide, as the phone's lists (about 1.5 of 24).
+#define DRAWN_ICON_DISC_PX (32.0f * 7 / 24)
+#define DRAWN_ICON_LINE_PX 2.5f
+// How high and which way, on the right of a target's chip, as the phone's badge: green from
+// 30° up, amber below (the app's success and warning colours).
+#define BADGE_HIGH 0x6FCF9F
+#define BADGE_LOW 0xFFB454
+#define BADGE_PAD_X 10
+#define BADGE_PAD_Y 4
 
 static lv_style_t style_page, style_chip, style_chip_pressed, style_disc, style_big, style_sub, style_title;
-static lv_style_t style_bubble, style_bubble_on;
+static lv_style_t style_bubble, style_bubble_on, style_badge_high, style_badge_low;
 static lv_style_t style_band, style_track, style_track_on, style_knob, style_knob_on, style_level, style_level_fill;
 
 void chip_styles_init(void)
 {
     lv_style_t *all[] = {&style_page, &style_chip, &style_chip_pressed, &style_disc, &style_big, &style_sub,
                          &style_title, &style_band, &style_track, &style_track_on, &style_knob, &style_knob_on,
-                         &style_level, &style_level_fill, &style_bubble, &style_bubble_on};
+                         &style_level, &style_level_fill, &style_bubble, &style_bubble_on,
+                         &style_badge_high, &style_badge_low};
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) lv_style_init(all[i]);
 
     lv_style_set_bg_opa(&style_page, LV_OPA_COVER);
@@ -84,6 +96,14 @@ void chip_styles_init(void)
     lv_style_set_radius(&style_level, LV_RADIUS_CIRCLE);
     lv_style_set_bg_opa(&style_level_fill, LV_OPA_COVER);
     lv_style_set_radius(&style_level_fill, LV_RADIUS_CIRCLE);
+    lv_style_t *badges[] = {&style_badge_high, &style_badge_low};
+    for (int i = 0; i < 2; i++) {
+        lv_style_set_bg_opa(badges[i], LV_OPA_COVER);
+        lv_style_set_radius(badges[i], LV_RADIUS_CIRCLE);
+        lv_style_set_pad_hor(badges[i], BADGE_PAD_X);
+        lv_style_set_pad_ver(badges[i], BADGE_PAD_Y);
+        lv_style_set_text_font(badges[i], &noto_sans_20);
+    }
     chip_set_night(false);
 }
 
@@ -115,6 +135,14 @@ void chip_set_night(bool night)
     lv_style_set_bg_color(&style_knob_on, night ? page : text);
     lv_style_set_bg_color(&style_level, chip);
     lv_style_set_bg_color(&style_level_fill, accent);
+    // Badges: dark words on green or amber; at night, on red, or red words in a red ring
+    // when low, so no word is ever grey.
+    lv_style_set_bg_color(&style_badge_high, lv_color_hex(night ? NIGHT_RED : BADGE_HIGH));
+    lv_style_set_text_color(&style_badge_high, page);
+    lv_style_set_bg_color(&style_badge_low, night ? chip : lv_color_hex(BADGE_LOW));
+    lv_style_set_text_color(&style_badge_low, night ? accent : page);
+    lv_style_set_border_width(&style_badge_low, night ? 2 : 0);
+    lv_style_set_border_color(&style_badge_low, accent);
     lv_obj_report_style_change(NULL);
 }
 
@@ -248,6 +276,61 @@ void chip_list_fit(lv_obj_t *list)
 {
     lv_obj_update_layout(list);
     fit_to_circle(list);
+}
+
+// Draws the app's icon named in the event's user data in the disc, in the disc's icon colour.
+typedef struct {
+    lv_layer_t *layer;
+    lv_draw_line_dsc_t line;
+} disc_draw_t;
+
+static void stroke_in_disc(float x0, float y0, float x1, float y1, float width, bool edge, void *ctx)
+{
+    disc_draw_t *d = ctx;
+    d->line.width = (int32_t)lroundf(fmaxf(1, width));
+    d->line.p1.x = (lv_value_precise_t)x0;
+    d->line.p1.y = (lv_value_precise_t)y0;
+    d->line.p2.x = (lv_value_precise_t)x1;
+    d->line.p2.y = (lv_value_precise_t)y1;
+    lv_draw_line(d->layer, &d->line);
+}
+
+static void on_disc_draw(lv_event_t *event)
+{
+    lv_obj_t *disc = lv_event_get_target_obj(event);
+    const char *name = lv_event_get_user_data(event);
+    lv_area_t area;
+    lv_obj_get_coords(disc, &area);
+    disc_draw_t d = {.layer = lv_event_get_layer(event)};
+    lv_draw_line_dsc_init(&d.line);
+    d.line.color = lv_obj_get_style_text_color(disc, LV_PART_MAIN);
+    d.line.round_start = d.line.round_end = 1;
+    float cx = (area.x1 + area.x2 + 1) / 2.0f, cy = (area.y1 + area.y2 + 1) / 2.0f;
+    sky_icons_trace(name, cx, cy, DRAWN_ICON_DISC_PX, DRAWN_ICON_LINE_PX, 0, stroke_in_disc, &d);
+}
+
+static void on_disc_delete(lv_event_t *event)
+{
+    lv_free(lv_event_get_user_data(event));
+}
+
+bool chip_set_drawn_icon(const chip_t *chip, const char *name)
+{
+    if (!chip->icon || !sky_icons_has(name)) return false;
+    lv_obj_t *disc = lv_obj_get_parent(chip->icon);
+    lv_label_set_text(chip->icon, "");
+    char *copy = lv_strdup(name);
+    lv_obj_add_event_cb(disc, on_disc_draw, LV_EVENT_DRAW_MAIN_END, copy);
+    lv_obj_add_event_cb(disc, on_disc_delete, LV_EVENT_DELETE, copy);
+    return true;
+}
+
+void chip_set_badge(const chip_t *chip, const char *text, bool high)
+{
+    lv_obj_t *badge = lv_label_create(chip->chip);
+    lv_obj_add_style(badge, high ? &style_badge_high : &style_badge_low, 0);
+    lv_label_set_text(badge, text);
+    lv_obj_set_clickable(badge, false);
 }
 
 void chip_set_sub(const chip_t *chip, const char *text)

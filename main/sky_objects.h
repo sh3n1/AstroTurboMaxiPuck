@@ -26,5 +26,14 @@ void sky_draw_chevrons(float x, float y, float angle, float distance_deg, bool n
 /** Draws the top layer into the canvas's pixels, and places its labels, which
  *  sky_labels_draw() draws after. eyepiece_field_deg: the eyepiece's true field (0 until
  *  known), for when the target is reached. moving: the Moon and planets, for their labels. */
+#define SKY_TARGET_LABEL_BYTES 24
+
+/**
+ * The selected target, from the app's targetInfo: its label as the map writes it ("" for
+ * none), its kind (the catalogue's number, for its colour) and its size (0 when unknown).
+ * Drawn first and in full, as the app's map does. From the link task.
+ */
+void sky_objects_set_target(const char *label, uint8_t kind, float size_arcmin);
+
 void sky_objects_draw(const sky_frame_t *f, bool night, float eyepiece_field_deg,
                       const moving_object_t *moving, size_t moving_count);
