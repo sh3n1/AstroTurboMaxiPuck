@@ -41,7 +41,9 @@ The items, and what each does:
 - **View** (the app's eyepiece tile): steps the phone, and so the puck, through the sky map,
   the eyepiece view and the field ring, as the app's view tile; like it, the chip shows the view a tap switches to.
 - **Lists:** the phone's lists (Best right now, Saved for later, …); one opens its targets,
-  and a target becomes the target. The ⏮ ⏭ arrows then step through that list.
+  each as the phone's rows: its icon (the app's own, or the closest Material Symbol for
+  stars and clusters) and how high and which way ("42° SE", green from 30° up, amber
+  below); a target becomes the target. The ⏮ ⏭ arrows then step through that list.
 - **Alignment:** guided, as the app's: it offers the target (while it is up) and the four
   easiest bright stars, each with where it is and how bright. One chosen becomes the
   target, so the map guides to it, and ✗ and Align show over the map where the zoom's ✗

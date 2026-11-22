@@ -86,6 +86,26 @@ static void on_nothing(lv_event_t *event)
 {
 }
 
+// The font's icon for the kinds the phone's lists show with a standard icon (the app's
+// target-list.component.ts): a star, sparkles, a ring, shapes.
+static const char *font_icon(const char *name)
+{
+    if (strcmp(name, "Star") == 0) return ICON_STAR;
+    if (strcmp(name, "Open cluster") == 0) return ICON_OPEN_CLUSTER;
+    if (strcmp(name, "Globular cluster") == 0) return ICON_GLOBULAR_CLUSTER;
+    return ICON_OTHER;
+}
+
+// A target's chip, as a row of the phone's lists: its icon (the app's own, drawn, or the
+// font's), and how high it is and which way to face.
+static void add_target_chip(const lists_item_t *t, lv_event_cb_t on_click, size_t i)
+{
+    chip_t chip = chip_add(column, ICON_TARGET, t->name, t->sub[0] ? t->sub : NULL, false, on_click,
+                           (void *)(intptr_t)i);
+    if (!chip_set_drawn_icon(&chip, t->icon)) lv_label_set_text(chip.icon, font_icon(t->icon));
+    if (t->badge[0]) chip_set_badge(&chip, t->badge, t->high);
+}
+
 // A star chosen to align on: it becomes the target, and ✗ and Align show over the map.
 static void on_star_chosen(lv_event_t *event)
 {
@@ -127,8 +147,7 @@ static void add_align(const lists_t *lists)
         remove_chip = chip_add(column, ICON_CLOSE, lists->align_remove, NULL, false, on_remove, NULL);
     }
     for (size_t i = 0; i < lists->align_count; i++) {
-        const lists_item_t *s = &lists->align_stars[i];
-        chip_add(column, ICON_STAR, s->name, s->sub, false, on_star_chosen, (void *)(intptr_t)i);
+        add_target_chip(&lists->align_stars[i], on_star_chosen, i);
     }
 }
 
@@ -154,9 +173,7 @@ static bool add_chips(size_t count)
         bool ours = strcmp(lists->targets_of, chosen_list) == 0;
         size_t total = ours ? lists->target_count : 0;
         for (size_t end = next_chip + count; next_chip < end && next_chip < total; next_chip++) {
-            const lists_item_t *t = &lists->targets[next_chip];
-            chip_add(column, ICON_TARGET, t->name, t->sub[0] ? t->sub : NULL, false, on_target_chosen,
-                     (void *)(intptr_t)next_chip);
+            add_target_chip(&lists->targets[next_chip], on_target_chosen, next_chip);
         }
         more_to_add = next_chip < total;
         if (!more_to_add && ours && lists->more) {

@@ -21,6 +21,8 @@
 #include "json_read.h"
 #include "align.h"
 #include "lists.h"
+#include "sky_icons.h"
+#include "sky_objects.h"
 #include "moving.h"
 #include "peer.h"
 #include "texts.h"
@@ -49,7 +51,7 @@ static const char *TAG = "link";
 #define CONNECT_TIMEOUT_US (20 * 1000 * 1000)
 // The biggest control message read: `objects`, the Moon and planets, is the biggest, at a
 // few KB. Read into one static buffer: messages only come in the link task.
-#define CONTROL_MAX_BYTES 8192
+#define CONTROL_MAX_BYTES 16384 // libpeer's SCTP_MAX_MESSAGE_SIZE: a list of 60 targets is about 7 KB
 // Keeping the link alive (the app's docs/puck.md, "Keeping the link alive"): each side
 // sends at least one message a second, and silence for 4 s means the link is lost.
 #define PING_INTERVAL_US (1000 * 1000)
@@ -187,6 +189,14 @@ static void on_control(const char *text)
         char name[VIEW_STATE_NAME_BYTES];
         if (!json_string(text, "name", name, sizeof(name))) name[0] = '\0';
         view_state_set_target(name);
+        // For the map: its label, kind and size, to draw it first and in full.
+        char label[SKY_TARGET_LABEL_BYTES] = "";
+        uint32_t kind = 0;
+        float size_arcmin = 0;
+        json_string(text, "label", label, sizeof(label));
+        json_uint(text, "kind", &kind);
+        json_float(text, "sizeArcmin", &size_arcmin); // null leaves it 0
+        sky_objects_set_target(label, (uint8_t)kind, size_arcmin);
         ESP_LOGI(TAG, "Target: %s", name[0] ? name : "(none)");
     }
     // What the puck shows besides the map: {"t":"state","night":false,"solving":false,...}
@@ -233,6 +243,10 @@ static void on_control(const char *text)
         ESP_LOGI(TAG, "The stars to align on received");
     } else if (strstr(text, "\"t\":\"alignStatus\"")) {
         align_set_status(text);
+    }
+    // A planet's icon: {"t":"icon","body":"Saturn","paths":[...]}
+    else if (strstr(text, "\"t\":\"icon\"")) {
+        sky_icons_parse(text);
     }
     // What moves: {"t":"objects","sun":{...},"items":[...]}
     else if (strstr(text, "\"t\":\"objects\"")) {
@@ -407,8 +421,11 @@ static void on_message(char *message, size_t length, void *user_data, uint16_t s
         return;
     }
 
-    static char text[CONTROL_MAX_BYTES];
-    if (length >= sizeof(text)) {
+    // In PSRAM, made on first use: internal RAM is kept for the Wi-Fi.
+    static char *text;
+    if (!text) text = heap_caps_malloc(CONTROL_MAX_BYTES, MALLOC_CAP_SPIRAM);
+    if (!text) return;
+    if (length >= CONTROL_MAX_BYTES) {
         ESP_LOGW(TAG, "Message of %u bytes on stream %u: too big, skipped", (unsigned)length,
                  stream_id);
         return;
@@ -476,6 +493,7 @@ static bool start_pairing(bool after_loss)
     catalog_cancel();
     catalog_acknowledge();
     view_state_clear();
+    sky_objects_set_target("", 0, 0);
     moving_clear();
     channel_open_time = 0;
     peer_found_time = 0;

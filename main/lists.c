@@ -16,7 +16,7 @@
 
 #define ITEM_MAX_BYTES 256 // one item's JSON: its id, name and line under it
 
-static lists_t *held;  // in PSRAM: about 13 KB, which the internal RAM can't spare
+static lists_t *held;  // in PSRAM: about 16 KB, which the internal RAM can't spare
 static SemaphoreHandle_t lock;
 
 // Made on first use, from whichever core comes first: the link starts before the menu.
@@ -85,11 +85,40 @@ void lists_parse_lists(const char *json)
         }
         json_uint(item, "count", &count);
         snprintf(list->sub, sizeof(list->sub), "%u", (unsigned)count);
+        list->icon[0] = list->badge[0] = '\0';
+        list->high = false;
         n++;
     }
     held->list_count = n;
     held->version++;
     xSemaphoreGive(lock);
+}
+
+// Reads a "key":[{"id","name","sub",…}] array into items; how many were read.
+static size_t parse_items(const char *array, lists_item_t *items, size_t max)
+{
+    size_t n = 0;
+    char item[ITEM_MAX_BYTES];
+    const char *p = array;
+    while (n < max && (p = next_item(p, item, sizeof(item))) != NULL) {
+        lists_item_t *it = &items[n];
+        if (!json_string(item, "id", it->id, sizeof(it->id)) || !json_string(item, "name", it->name, sizeof(it->name))) {
+            continue;
+        }
+        if (!json_string(item, "sub", it->sub, sizeof(it->sub))) it->sub[0] = '\0';
+        if (!json_string(item, "icon", it->icon, sizeof(it->icon))) it->icon[0] = '\0';
+        // How high and which way, as the phone's badge: "42° SE".
+        float alt;
+        char dir[8] = "";
+        it->badge[0] = '\0';
+        if (json_float(item, "alt", &alt) && json_string(item, "dir", dir, sizeof(dir))) {
+            snprintf(it->badge, sizeof(it->badge), "%d° %s", (int)alt, dir);
+        }
+        it->high = false;
+        json_bool(item, "good", &it->high);
+        n++;
+    }
+    return n;
 }
 
 void lists_parse_targets(const char *json)
@@ -109,41 +138,13 @@ void lists_parse_targets(const char *json)
         !json_string(head, "name", held->targets_name, sizeof(held->targets_name))) {
         held->targets_of[0] = '\0';
     }
-    size_t n = 0;
-    char item[ITEM_MAX_BYTES];
-    while (n < LISTS_TARGETS_MAX && (p = next_item(p, item, sizeof(item))) != NULL) {
-        lists_item_t *target = &held->targets[n];
-        if (!json_string(item, "id", target->id, sizeof(target->id)) ||
-            !json_string(item, "name", target->name, sizeof(target->name))) {
-            continue;
-        }
-        if (!json_string(item, "sub", target->sub, sizeof(target->sub))) target->sub[0] = '\0';
-        n++;
-    }
-    held->target_count = n;
+    held->target_count = parse_items(p, held->targets, LISTS_TARGETS_MAX);
     // "more" is the message's own: the targets have none.
     uint32_t more = 0;
     json_uint(json, "more", &more);
     held->more = more;
     held->version++;
     xSemaphoreGive(lock);
-}
-
-// Reads a "key":[{"id","name","sub"}] array into items; how many were read.
-static size_t parse_items(const char *array, lists_item_t *items, size_t max)
-{
-    size_t n = 0;
-    char item[ITEM_MAX_BYTES];
-    const char *p = array;
-    while (n < max && (p = next_item(p, item, sizeof(item))) != NULL) {
-        lists_item_t *it = &items[n];
-        if (!json_string(item, "id", it->id, sizeof(it->id)) || !json_string(item, "name", it->name, sizeof(it->name))) {
-            continue;
-        }
-        if (!json_string(item, "sub", it->sub, sizeof(it->sub))) it->sub[0] = '\0';
-        n++;
-    }
-    return n;
 }
 
 void lists_parse_align(const char *json)

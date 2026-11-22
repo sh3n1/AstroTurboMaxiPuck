@@ -10,6 +10,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include "sky_labels.h"
 #include "sky_pixels.h"
 #include "texts.h"
@@ -76,6 +77,10 @@ static const float CHEVRON_FADE[] = {0.35f, 0.65f, 1.0f};
 #define NO_MAGNITUDE 32767
 #define KIND_STAR 5
 #define KIND_DOUBLE_STAR 6
+#define KIND_PLANET 7 // to KIND_MOON: the solar system
+#define KIND_MOON 10
+// The selected target's label: this far beyond its marker, as the app's (15).
+#define TARGET_LABEL_GAP_PX (15 * PX_SCALE)
 
 typedef struct {
     float v[3];
@@ -113,6 +118,27 @@ static name_t *names;
 static size_t name_count;
 static char *strings;     // our copy of the catalogue's strings
 static size_t strings_bytes;
+// The selected target, from the link (sky_objects_set_target), and this frame's copy.
+static portMUX_TYPE target_lock = portMUX_INITIALIZER_UNLOCKED;
+static char target_label_in[SKY_TARGET_LABEL_BYTES];
+static uint8_t target_kind_in;
+static float target_size_in;
+static char target_label[SKY_TARGET_LABEL_BYTES];
+
+void sky_objects_set_target(const char *label, uint8_t kind, float size_arcmin)
+{
+    taskENTER_CRITICAL(&target_lock);
+    strlcpy(target_label_in, label, sizeof(target_label_in));
+    target_kind_in = kind;
+    target_size_in = size_arcmin;
+    taskEXIT_CRITICAL(&target_lock);
+}
+
+// Whether a label is the selected target's, already written (draw_target_label).
+static bool is_target(const char *label)
+{
+    return target_label[0] && strcmp(label, target_label) == 0;
+}
 
 static const char *string_at(uint32_t offset)
 {
@@ -290,6 +316,27 @@ static void draw_pointer(const sky_frame_t *f, bool night, float eyepiece_field_
                       angle, v->target_dist_deg, night);
 }
 
+// The selected target's label, first, so it wins any clash, and in full even below the
+// horizon (the app's drawTargets), beside its crosshair or its size circle.
+static void draw_target_label(const sky_frame_t *f, bool night, uint8_t kind, float size_arcmin)
+{
+    const puck_view_msg_t *v = f->view;
+    if (!target_label[0] || isnan(v->target_dist_deg) || isnan(v->target_dir_deg)) return;
+    float r = sky_radius_px(f, 2 * v->target_dist_deg);
+    float dir = v->target_dir_deg * SKY_DEG_TO_RAD;
+    float x = SKY_CENTRE_PX + r * sinf(dir), y = SKY_CENTRE_PX - r * cosf(dir);
+    if (x < -40 || y < -40 || x > SKY_SIZE_PX + 40 || y > SKY_SIZE_PX + 40) return;
+    bool solar = kind >= KIND_PLANET && kind <= KIND_MOON;
+    bool star = kind == KIND_STAR || kind == KIND_DOUBLE_STAR;
+    uint32_t color = solar ? SKY_COLOR_SOLAR_SYSTEM : star ? (night ? COLOR_STAR_LABEL_NIGHT : COLOR_STAR_LABEL_DAY)
+                                                           : COLOR_DEEP_SKY;
+    float marker = size_arcmin > 0 ? sky_radius_px(f, size_arcmin / 60) : 0;
+    // A planet's icon reaches 12 of its 24 grid from its middle, its disc being 7 at 7 pixels.
+    if (solar) marker = fmaxf(marker, 12 * PX_SCALE);
+    float gap = fmaxf(CROSSHAIR_GAP_PX, marker + 3 * PX_SCALE) + TARGET_LABEL_GAP_PX;
+    draw_label(target_label, x + gap, y, sky_for_night(color, night), 1, false);
+}
+
 // ---- The parts ----
 
 // The horizon's line, with the compass points written under it (the app's drawHorizon).
@@ -334,6 +381,7 @@ static void draw_moving_labels(const sky_frame_t *f, bool night, const moving_ob
         bool below;
         if (!sky_project(f, o->v, &x, &y, &below)) continue;
         float disc = fmaxf(7 * PX_SCALE, sky_radius_px(f, o->size_arcmin / 60));
+        if (is_target(o->label)) continue; // written first (draw_target_label)
         float alpha = below && f->fade_below ? SKY_BELOW_HORIZON_OPACITY : 1;
         draw_label(o->label, x + disc + 3 * PX_SCALE, y, sky_for_night(SKY_COLOR_SOLAR_SYSTEM, night), alpha,
                    false);
@@ -366,20 +414,26 @@ static void update_shown(float fov_deg)
 static void draw_object(const sky_frame_t *f, bool night, const candidate_t *c)
 {
     const object_t *o = &objects[c->index];
-    float alpha = c->below && f->fade_below ? SKY_BELOW_HORIZON_OPACITY : 1;
+    // The selected target shows in full, its size circle in its own colour, and its label
+    // is written already (draw_target_label), as the app's map does.
+    bool selected = is_target(string_at(o->label));
+    float alpha = c->below && f->fade_below && !selected ? SKY_BELOW_HORIZON_OPACITY : 1;
     bool star = o->kind == KIND_STAR || o->kind == KIND_DOUBLE_STAR;
     uint32_t color = star ? (night ? COLOR_STAR_LABEL_NIGHT : COLOR_STAR_LABEL_DAY) : COLOR_DEEP_SKY;
-    bool shows_size = o->messier || o->mag <= MAX_SIZE_CIRCLE_MAG;
+    bool shows_size = selected || o->messier || o->mag <= MAX_SIZE_CIRCLE_MAG;
     float size_radius = shows_size && o->size_deg > 0 ? sky_radius_px(f, o->size_deg) : 0;
     float marker = size_radius;
     if (size_radius >= MIN_SIZE_CIRCLE_PX) {
-        draw_dashed_ring(c->x, c->y, size_radius,
-                         sky_for_night(night ? COLOR_SIZE_CIRCLE_NIGHT : COLOR_SIZE_CIRCLE_DAY, night), alpha);
+        uint32_t ring = selected ? color : night ? COLOR_SIZE_CIRCLE_NIGHT : COLOR_SIZE_CIRCLE_DAY;
+        draw_dashed_ring(c->x, c->y, size_radius, sky_for_night(ring, night), alpha);
+    } else if (selected) {
+        // The crosshair marks it (draw_target).
     } else if (!star) {
         // Stars are already drawn as dots: only other objects need a small marker.
         draw_ring(c->x, c->y, MARKER_RADIUS_PX, sky_for_night(color, night), alpha);
         marker = MARKER_RADIUS_PX;
     }
+    if (selected) return;
     draw_label(string_at(o->label), c->x + fmaxf(LABEL_GAP_PX, marker + 3 * PX_SCALE), c->y,
                sky_for_night(color, night), alpha, false);
 }
@@ -424,7 +478,16 @@ static void draw_names(const sky_frame_t *f, bool night)
 void sky_objects_draw(const sky_frame_t *f, bool night, float eyepiece_field_deg,
                       const moving_object_t *moving, size_t moving_count)
 {
+    uint8_t kind;
+    float size_arcmin;
+    taskENTER_CRITICAL(&target_lock);
+    memcpy(target_label, target_label_in, sizeof(target_label));
+    kind = target_kind_in;
+    size_arcmin = target_size_in;
+    taskEXIT_CRITICAL(&target_lock);
+
     sky_labels_begin();
+    draw_target_label(f, night, kind, size_arcmin); // first: it wins every clash
     draw_horizon(f, night); // in the eyepiece view too, as the app's
     draw_moving_labels(f, night, moving, moving_count);
     draw_catalog_objects(f, night);

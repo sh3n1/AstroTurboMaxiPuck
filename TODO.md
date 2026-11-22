@@ -122,16 +122,17 @@ cable: `tools/screenshot.py`; the log's last 20 minutes: `tools/puck_log.py`.*
       phase, turned towards the Sun; dashed size circles; the eyepiece's circle and the dark
       mask around it (the app's `state` now sends `eyepieceFieldDeg`); the selected target's
       green crosshair, placed from the `view`'s distance and direction.
-    - Still to do:
-      - the app's own icons for galaxies, nebulae, clusters, planets, Pluto, Ceres and the
-        asteroids (`target-icons.ts`), instead of plain rings and discs;
-      - the selected target's label first and in full below the horizon (the puck doesn't
-        know which catalogue object it is: `targetInfo` could carry its label);
-      - the pointer to an off-screen target (`drawPointer`) and the chevrons (task 11);
-      - the reticle's solving pulse (task 12) and its ring labels ("2°");
-      - the faint stars in the eyepiece view (task 15's question);
-      - the user's own targets, not yet sent (`objects` could carry them);
-      - Greek letters in labels, such as "κ Cyg" (the font lacks them; task 9).
+    - *Built 2026-11-22, to test on the board:* the planets' own icons (Mercury, Mars,
+      Jupiter, Saturn, Uranus, Neptune, Pluto, Ceres, the asteroids), sent by the app
+      flattened into lines (`icon`, the app's `puck-icons.ts`; `main/sky_icons.c`); the
+      selected target's label first and in full below the horizon, its size circle in its
+      own colour (`targetInfo` carries `label`, `kind` and `sizeArcmin`).
+    - Found done already: the pointer and chevrons to an off-screen target (`draw_pointer`),
+      the reticle's solving pulse, the faint stars in the eyepiece view, and Greek letters.
+    - Not needed: deep-sky icons (the app's map draws rings and size circles for them, as
+      the puck does), the user's own targets (the app has none: every target is in the
+      catalogue or the solar system), and the ring labels (decided 2026-11-22).
+    - Later: `main/link.c` is near 600 lines; its message reading could move to a file.
 
 ## 4. The menu
 
@@ -163,7 +164,9 @@ Material Symbols icons, and what each item does.
     the user's lists, Messier and Caldwell; only the targets above the horizon, up to 60.
     The pages are in `main/menu_lists.c`, built a few chips at a time (60 at once held the
     screen for a second); LVGL has 512 KB more in PSRAM (`main/board.c`), as 60 chips
-    overflowed its 64 KB and restarted the puck.
+    overflowed its 64 KB and restarted the puck. *Also built 2026-11-22, to test:* each
+    target as the phone's rows, with its icon (the app's own drawn from `icon` messages, or
+    the closest Material Symbol) and its height and direction badge ("42° SE").
 22d. **Alignment**, guided as the app's: the easiest bright star or the target, guidance,
     "Align" when centred, and "Remove alignment". *Built 2026-11-22, to test on the board:*
     the `alignStars`, `alignChoose`, `alignNow`, `alignRemove` and `alignStatus` messages

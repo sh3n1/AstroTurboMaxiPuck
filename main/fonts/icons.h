@@ -29,3 +29,7 @@
 #define ICON_REMOVE "\xEE\x85\x9B" // remove, U+E15B
 #define ICON_STAR "\xEF\x82\x9A" // star, U+F09A
 #define ICON_TARGET "\xEE\x9C\x99" // target, U+E719
+// The phone's lists' standard icons (Ionic), matched: sparkles, ellipse and shapes.
+#define ICON_OPEN_CLUSTER "\xEE\x99\x9F" // auto_awesome, U+E65F
+#define ICON_GLOBULAR_CLUSTER "\xEE\xBD\x8A" // circle, U+EF4A
+#define ICON_OTHER "\xEE\x98\x82" // shapes, U+E602
