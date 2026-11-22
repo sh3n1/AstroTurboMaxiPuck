@@ -52,5 +52,8 @@ const char *wifi_own_name(void);
 /** The QR code that joins the puck's own network: "WIFI:T:WPA;S:<name>;P:<password>;;". */
 void wifi_join_qr(char *out, size_t out_len);
 
+/** The puck's address now, such as "192.168.1.57", or "" when it has none. */
+const char *wifi_address(void);
+
 /** Restarts the puck in a moment, so a web page's answer can still go out first. */
 void wifi_restart_soon(void);

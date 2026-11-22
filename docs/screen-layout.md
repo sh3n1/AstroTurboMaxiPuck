@@ -77,4 +77,6 @@ The items, and what each does:
   - **Meade LX200 Repeater** (in Settings, decided 2026-11-22): a switch: the puck answers
     LX200 commands over Wi-Fi (TCP port 4030), so planetarium apps (Stellarium, SkySafari)
     show where the telescope points, and a GoTo from them becomes the target on the phone
-    and the puck, which then guide to it.
+    and the puck, which then guide to it (the nearest object within 2°). While on, the chip
+    shows the address to give the planetarium ("192.168.1.57:4030"); the planetarium is set
+    to a Meade LX200 telescope, JNow (equinox of date).

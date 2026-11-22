@@ -17,6 +17,7 @@
 #include "icons.h"
 #include "link.h"
 #include "lists.h"
+#include "lx200.h"
 #include "menu_lists.h"
 #include "menu_chip.h"
 #include "texts.h"
@@ -205,7 +206,8 @@ static void on_item(lv_event_t *event)
         open_later(PAGE_ALIGN);
         break;
     case DO_LX200:
-        // Being built (TODO.md, task 25).
+        lx200_set_enabled(!lx200_enabled());
+        open_later(PAGE_SETTINGS); // shows the switch and the address anew
         break;
     case DO_WIFI_CLIENT:
         // Restarts into setup: the puck's own network and its web page (wifi.h).
@@ -299,8 +301,12 @@ static void show_page(page_t next)
         snprintf(level, sizeof(level), "%d %%", brightness_percent());
         chip_set_sub(&brightness_chip, level);
         add(ICON_WIFI, TEXTS_WIFI, false, false, DO_WIFI);
+        // While on, the address to give the planetarium app, else "Off".
         chip_t lx200 = add(ICON_LX200, TEXTS_LX200, true, true, DO_LX200);
-        chip_set_sub(&lx200, on_off(false));
+        char where[32];
+        snprintf(where, sizeof(where), "%s:%d", wifi_address(), LX200_PORT);
+        chip_set_sub(&lx200, lx200_enabled() && wifi_address()[0] ? where : on_off(lx200_enabled()));
+        chip_set_on(&lx200, lx200_enabled());
         break;
     }
     case PAGE_WIFI: {
