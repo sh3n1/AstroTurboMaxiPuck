@@ -20,6 +20,7 @@
 #include "menu_lists.h"
 #include "menu_chip.h"
 #include "texts.h"
+#include "wifi.h"
 #include "zoom.h"
 
 #define BACK_PX 72
@@ -204,9 +205,15 @@ static void on_item(lv_event_t *event)
         open_later(PAGE_ALIGN);
         break;
     case DO_LX200:
+        // Being built (TODO.md, task 25).
+        break;
     case DO_WIFI_CLIENT:
+        // Restarts into setup: the puck's own network and its web page (wifi.h).
+        wifi_open_setup();
+        break;
     case DO_WIFI_AP:
-        // Being built (TODO.md, tasks 23 to 25).
+        // Restarts with or without the puck's own network.
+        wifi_set_own_network(!wifi_own_network());
         break;
     }
 }
@@ -300,7 +307,8 @@ static void show_page(page_t next)
         texts_word(TEXTS_WIFI, text);
         add(ICON_WIFI_CLIENT, TEXTS_WIFI_CLIENT, false, false, DO_WIFI_CLIENT);
         chip_t ap = add(ICON_WIFI_AP, TEXTS_WIFI_AP, true, true, DO_WIFI_AP);
-        chip_set_sub(&ap, on_off(false));
+        chip_set_sub(&ap, on_off(wifi_own_network()));
+        chip_set_on(&ap, wifi_own_network());
         break;
     }
     case PAGE_BRIGHTNESS:

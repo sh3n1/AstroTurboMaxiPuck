@@ -172,8 +172,14 @@ Material Symbols icons, and what each item does.
 23. **Settings → Wi-Fi → Client**: the puck's own network for a moment, a QR code to join
     it, and a setup web page (ESP-IDF's `esp_http_server`) listing the networks seen and
     taking the password, kept in NVS. Also at start-up with no network saved or found.
+    *Built 2026-11-22, to test on the board* (`main/wifi.c`, `main/wifi_setup.c`): the chip
+    restarts into setup; a saved network not joined in a minute opens it too, and setup with
+    no phone for 5 minutes goes back to the saved network. menuconfig's network is only the
+    fallback now. Up to 5 networks kept (`main/wifi_networks.c`); the puck scans and joins
+    the strongest in range, and rescans after losing it.
 24. **Settings → Wi-Fi → AP**: a switch; the puck's own network, a Wi-Fi QR code to join
-    it, then the pairing QR. Depends on 23.
+    it, then the pairing QR. Depends on 23. *Built 2026-11-22, to test on the board:*
+    "AstroPuck-XXXX", its password made once and kept in NVS; the switch restarts the puck.
 25. **Settings → Meade LX200 Repeater**: a switch; LX200 over TCP port 4030: where the telescope
     points, for Stellarium or SkySafari, and their GoTo becomes the target. Depends on 6, 19.
 

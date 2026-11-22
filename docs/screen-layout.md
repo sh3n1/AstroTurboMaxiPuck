@@ -59,12 +59,19 @@ The items, and what each does:
     the left, full on the right, as the distance bar) that can be dragged; 10 % to 100 %,
     kept in the puck. Not a ring: the title along the top edge hid part of it.
   - **Wi-Fi**
-    - **Client:** the network the puck joins. With no link to type on, the puck opens its
-      own network for a moment and shows a QR code to join it; a small web page served by
-      the puck (ESP-IDF's web server) lists the networks it sees and takes the password,
-      kept in the puck's NVS. Also offered at start-up when no network is saved or found.
+    - **Client:** the network the puck joins. With no link to type on, the puck restarts
+      into setup: its own network ("AstroPuck-XXXX") and a QR code to join it; once the
+      phone is on it, a second QR code opens a small web page served by the puck
+      (http://192.168.4.1/, ESP-IDF's web server) that lists the networks it sees and takes
+      the password, kept in the puck's NVS. It keeps up to 5 networks (home, the phone's
+      hotspot, a club's), each with Forget on the page, and joins the strongest of them in
+      range (decided 2026-11-22). Saving restarts the puck. Setup also opens by itself when
+      no network is set or none of the kept ones is joined in a minute; with no phone on it for 5 minutes, the puck tries the saved network again.
+      In English, as everything before a link.
     - **AP:** a switch: the puck makes its own network, for the field without a router, and
       shows a Wi-Fi QR code (name and password) for the phone to join, then the pairing QR.
+      The password is made once and kept, so the phone rejoins by itself. Switching
+      restarts the puck.
   - **Meade LX200 Repeater** (in Settings, decided 2026-11-22): a switch: the puck answers
     LX200 commands over Wi-Fi (TCP port 4030), so planetarium apps (Stellarium, SkySafari)
     show where the telescope points, and a GoTo from them becomes the target on the phone
