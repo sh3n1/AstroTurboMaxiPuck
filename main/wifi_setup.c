@@ -12,7 +12,12 @@
 
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
+#include "freertos/task.h"
+#include "lwip/sockets.h"
 #include "wifi.h"
 #include "wifi_networks.h"
 
@@ -20,6 +25,10 @@ static const char *TAG = "wifi_setup";
 
 #define NETWORKS_MAX 20
 #define BODY_MAX_BYTES 400 // the name and password, each up to three times longer encoded
+#define PAGE_URL "http://192.168.4.1/"
+#define DNS_PORT 53
+#define DNS_MAX_BYTES 512   // a DNS message over UDP
+#define DNS_TASK_STACK (4 * 1024)
 
 // Big text and buttons, dark, as the puck's screen: read at arm's length, often at night.
 static const char PAGE_HEAD[] =
@@ -36,15 +45,21 @@ static const char PAGE_HEAD[] =
     "label{display:block;margin-top:18px}h2{font-size:20px;margin:22px 0 4px}"
     ".kept{display:flex;gap:8px;align-items:center}.kept span{flex:1;overflow-wrap:anywhere}"
     ".kept button{width:auto;text-align:center}"
+    ".pass{display:flex;gap:8px}.pass button{width:auto;text-align:center;flex:none}"
     "</style></head><body><h1>Wi-Fi for the puck</h1>";
 
 static const char PAGE_FORM[] =
     "<form method=post action=/save>"
     "<label for=ssid>Network</label><input id=ssid name=ssid maxlength=32 required>"
-    "<label for=pass>Password</label><input id=pass name=pass type=password maxlength=63>"
+    "<label for=pass>Password</label><div class=pass>"
+    "<input id=pass name=pass type=password maxlength=63 autocomplete=off>"
+    "<button type=button id=show>Show</button></div>"
     "<button class=save type=submit>Save and join</button></form>"
     "<script>document.querySelectorAll('button[data-ssid]').forEach(b=>b.onclick=()=>{"
-    "ssid.value=b.dataset.ssid;pass.focus()})</script></body></html>";
+    "ssid.value=b.dataset.ssid;pass.focus()});"
+    // Show or hide what was typed: a long password is easy to get wrong on a phone.
+    "show.onclick=()=>{const h=pass.type=='password';pass.type=h?'text':'password';"
+    "show.textContent=h?'Hide':'Show'}</script></body></html>";
 
 // Writes text with HTML's special characters escaped: network names can hold anything.
 static void send_escaped(httpd_req_t *req, const char *text)
@@ -201,11 +216,77 @@ static esp_err_t on_save(httpd_req_t *req)
     return ESP_OK;
 }
 
+// A captive portal, as hotel networks have, so the phone opens the page by itself and stays
+// on a network with no internet. Every name the phone looks up is the puck (dns_task); every
+// address it then asks for, such as Android's connectivitycheck.gstatic.com/generate_204 or
+// Apple's captive.apple.com/hotspot-detect.html, is sent to the page.
+static esp_err_t on_other(httpd_req_t *req, httpd_err_code_t error)
+{
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", PAGE_URL);
+    return httpd_resp_send(req, NULL, 0);
+}
+
+// Answers every A (IPv4) question with the puck's own address; other questions with none.
+static void dns_task(void *arg)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    struct sockaddr_in address = {.sin_family = AF_INET, .sin_port = htons(DNS_PORT), .sin_addr.s_addr = INADDR_ANY};
+    if (sock < 0 || bind(sock, (struct sockaddr *)&address, sizeof(address)) != 0) {
+        ESP_LOGE(TAG, "No DNS: the page must be opened by hand");
+        if (sock >= 0) close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+    static uint8_t m[DNS_MAX_BYTES];
+    for (;;) {
+        struct sockaddr_in from;
+        socklen_t from_len = sizeof(from);
+        int n = recvfrom(sock, m, sizeof(m), 0, (struct sockaddr *)&from, &from_len);
+        // A header of 12 bytes, a query (QR bit clear) with one question.
+        if (n < 12 || (m[2] & 0x80) || m[4] != 0 || m[5] != 1) continue;
+        // Past the question's name (labels up to a zero byte), then its type and class.
+        int end = 12;
+        while (end < n && m[end] != 0) end += m[end] + 1;
+        end += 5;
+        if (end > n) continue;
+        bool ipv4 = m[end - 4] == 0 && m[end - 3] == 1;
+        m[2] = 0x81; // a response, recursion wanted
+        m[3] = 0x80; // recursion available, no error
+        m[6] = 0;
+        m[7] = ipv4 ? 1 : 0; // answers
+        memset(m + 8, 0, 4); // no authority or extra records
+        int len = end;
+        if (ipv4 && len + 16 <= (int)sizeof(m)) {
+            static const uint8_t answer[] = {
+                0xC0, 0x0C,             // the name: the question's, by pointer
+                0x00, 0x01, 0x00, 0x01, // type A, class IN
+                0x00, 0x00, 0x00, 0x3C, // 60 s
+                0x00, 0x04, 192, 168, 4, 1,
+            };
+            memcpy(m + len, answer, sizeof(answer));
+            len += sizeof(answer);
+        }
+        sendto(sock, m, len, 0, (struct sockaddr *)&from, from_len);
+    }
+}
+
+// Tells phones in the DHCP answer that this is a sign-in network, and where (RFC 8910).
+static void announce_portal(void)
+{
+    esp_netif_t *ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    if (!ap) return;
+    esp_netif_dhcps_stop(ap);
+    esp_netif_dhcps_option(ap, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, (void *)PAGE_URL, strlen(PAGE_URL));
+    esp_netif_dhcps_start(ap);
+}
+
 esp_err_t wifi_setup_start(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192; // the scan's records and the page's pieces
+    config.lru_purge_enable = true; // phones open many connections to check the network
     esp_err_t err = httpd_start(&server, &config);
     if (err != ESP_OK) return err;
     static const httpd_uri_t page = {.uri = "/", .method = HTTP_GET, .handler = on_page};
@@ -214,6 +295,10 @@ esp_err_t wifi_setup_start(void)
     httpd_register_uri_handler(server, &page);
     httpd_register_uri_handler(server, &save);
     httpd_register_uri_handler(server, &forget);
-    ESP_LOGI(TAG, "Setup page on http://192.168.4.1/");
+    httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, on_other);
+    announce_portal();
+    // On core 0, with the Wi-Fi; its stack in PSRAM, as the LX200 server's.
+    xTaskCreatePinnedToCoreWithCaps(dns_task, "dns", DNS_TASK_STACK, NULL, 2, NULL, 0, MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Setup page on " PAGE_URL ", as a captive portal");
     return ESP_OK;
 }
