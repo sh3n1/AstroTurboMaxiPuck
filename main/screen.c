@@ -12,10 +12,10 @@
 
 #include "board.h"
 #include "fonts.h"
-#include "menu.h"
-#include "link.h"
+#include "player.h"
 #include "sky_common.h"
 #include "texts.h"
+#include "view_state.h"
 #include "zoom.h"
 
 // The app's colours (theme.ts, sky-style.ts), and night's full-strength red on black.
@@ -52,75 +52,97 @@ static const float RETICLE_DIAMETERS_DEG[] = {0.5f, 2.0f, 4.0f};
 #define READOUT_SPAN_DEG 150
 #define READOUT_BAND_PX 40
 #define READOUT_BAND_OPA LV_OPA_70
-
-// The bottom third, from top to bottom (centres, from the screen's top). It shows after a
-// tap on the map, and goes again after this long without one.
-#define NAME_Y 282
-#define NAME_WIDTH_PX 380
-#define BUTTONS_Y 344
-#define BUTTON_PX 76
-#define BUTTON_GAP_PX 140
-#define BAR_Y 406
-#define BAR_WIDTH_PX 230
-#define BAR_HEIGHT_PX 14
-#define DISTANCE_Y 438
-#define CONTROLS_SHOW_MS 15000
-// The bar's scale: full at the target, empty this far away, by the logarithm of the distance,
-// so the last few degrees still move it.
-#define BAR_FAR_DEG 180.0f
+// The bottom edge, while there is a target, as the top's: one line with its designations
+// and name, then how far it is. A long name is cut, never the distance.
+#define TARGET_SPAN_DEG 190 // up the sides, short of the top's readout (READOUT_SPAN_DEG)
+#define TARGET_TEXT_PX (READOUT_RADIUS_PX * TARGET_SPAN_DEG * DEG_TO_RAD - 16)
+#define TARGET_GAP "   "
 
 static lv_obj_t *rings[RING_COUNT];
 static lv_obj_t *readout;
 static lv_obj_t *readout_band;
-static lv_obj_t *name_label;
-static lv_obj_t *buttons[3]; // previous, Menu, next
-static lv_obj_t *button_labels[3];
-static lv_obj_t *bar;
-static lv_obj_t *distance_label;
+static lv_obj_t *edge_band, *edge_text;
 
 static bool night;
 static bool on_target;
 static bool has_view, has_name, has_target;
 static float outer_ring_px; // the reticle's outer ring, for taps
-static bool controls_on;    // the bottom third shows
-static uint32_t controls_since;
 
-static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font)
+// A dark band along the edge, centred on centre_deg (LVGL's: 90 is the bottom, 270 the top).
+static lv_obj_t *make_band(lv_obj_t *screen, int centre_deg, int span_deg, int width_px)
 {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_style_text_font(label, font, 0);
-    lv_label_set_text(label, "");
-    lv_obj_set_clickable(label, false);
-    return label;
+    lv_obj_t *band = lv_arc_create(screen);
+    lv_obj_set_size(band, BOARD_SCREEN_PX, BOARD_SCREEN_PX);
+    lv_obj_center(band);
+    lv_arc_set_bg_angles(band, centre_deg - span_deg / 2 - 5, centre_deg + span_deg / 2 + 5);
+    lv_obj_remove_style(band, NULL, LV_PART_KNOB);
+    lv_obj_remove_style(band, NULL, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(band, width_px, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(band, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(band, lv_color_hex(COLOR_BACKING), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(band, READOUT_BAND_OPA, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(band, 0, LV_PART_INDICATOR);
+    lv_obj_set_clickable(band, false);
+    return band;
 }
 
-// Shows or hides the bottom third's parts, as it stands now.
-static void place_controls(void)
+// Text along the bottom edge, read left to right, letters upright: counter-clockwise from
+// the left. Too long, it ends in "...".
+static lv_obj_t *make_bottom_text(lv_obj_t *screen, int radius_px)
 {
-    if (controls_on && lv_tick_elaps(controls_since) > CONTROLS_SHOW_MS) controls_on = false;
-    bool shown = has_view && controls_on && !zoom_active();
-    lv_obj_set_hidden(name_label, !shown || !has_name);
-    for (int i = 0; i < 3; i++) lv_obj_set_hidden(buttons[i], !shown);
-    lv_obj_set_hidden(bar, !shown || !has_target);
-    lv_obj_set_hidden(distance_label, !shown || !has_target);
+    lv_obj_t *text = lv_arclabel_create(screen);
+    lv_obj_set_size(text, BOARD_SCREEN_PX, BOARD_SCREEN_PX);
+    lv_obj_set_style_text_font(text, &noto_sans_28, 0);
+    lv_arclabel_set_radius(text, radius_px);
+    // The arc still runs clockwise from its start, over the bottom; the letters go along it
+    // from its far end, the left.
+    lv_arclabel_set_angle_start(text, 90 - TARGET_SPAN_DEG / 2);
+    lv_arclabel_set_angle_size(text, TARGET_SPAN_DEG);
+    lv_arclabel_set_dir(text, LV_ARCLABEL_DIR_COUNTER_CLOCKWISE);
+    lv_arclabel_set_text_horizontal_align(text, LV_ARCLABEL_TEXT_ALIGN_CENTER);
+    lv_arclabel_set_text_vertical_align(text, LV_ARCLABEL_TEXT_ALIGN_CENTER);
+    lv_arclabel_set_overflow(text, LV_ARCLABEL_OVERFLOW_ELLIPSIS);
+    lv_arclabel_set_text(text, "");
+    lv_obj_set_clickable(text, false);
+    lv_obj_center(text);
+    return text;
 }
 
-// The previous and next buttons send `step`; Menu opens the menu. Each keeps the bottom
-// third showing a while longer.
-static void on_button(lv_event_t *event)
+// How wide a UTF-8 text is in a font, in pixels; as many bytes as len.
+static int text_width_px(const char *text, size_t len, const lv_font_t *font)
 {
-    controls_since = lv_tick_get();
-    switch ((intptr_t)lv_event_get_user_data(event)) {
-    case 0:
-        link_send_command("{\"t\":\"step\",\"by\":-1}");
-        break;
-    case 1:
-        menu_open();
-        break;
-    case 2:
-        link_send_command("{\"t\":\"step\",\"by\":1}");
-        break;
+    int width = 0;
+    const unsigned char *p = (const unsigned char *)text, *end = p + len;
+    while (p < end) {
+        uint32_t c = *p++;
+        int more = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
+        c &= more == 3 ? 0x07 : more == 2 ? 0x0F : more == 1 ? 0x1F : 0x7F;
+        while (more-- > 0 && p < end) c = c << 6 | (*p++ & 0x3F);
+        width += lv_font_get_glyph_width(font, c, 0);
     }
+    return width;
+}
+
+// The bottom edge's line: the names, cut on a whole character with "..." when the
+// distance wouldn't fit after them, then the distance.
+static void set_edge_text(const char *names, const char *place)
+{
+    const lv_font_t *font = &noto_sans_28;
+    char line[VIEW_STATE_NAME_BYTES + TEXTS_READOUT_BYTES + 8];
+    int tail_px = text_width_px(TARGET_GAP, strlen(TARGET_GAP), font) + text_width_px(place, strlen(place), font);
+    size_t len = strlen(names);
+    if (text_width_px(names, len, font) + tail_px > TARGET_TEXT_PX) {
+        int dots_px = text_width_px("...", 3, font);
+        while (len > 0 && text_width_px(names, len, font) + dots_px + tail_px > TARGET_TEXT_PX) {
+            do len--;
+            while (len > 0 && ((unsigned char)names[len] & 0xC0) == 0x80);
+        }
+        while (len > 0 && names[len - 1] == ' ') len--;
+        snprintf(line, sizeof(line), "%.*s...%s%s", (int)len, names, TARGET_GAP, place);
+    } else {
+        snprintf(line, sizeof(line), "%s%s%s", names, place[0] ? TARGET_GAP : "", place);
+    }
+    lv_arclabel_set_text(edge_text, line);
 }
 
 void screen_create(lv_obj_t *screen)
@@ -160,38 +182,9 @@ void screen_create(lv_obj_t *screen)
     lv_obj_set_clickable(readout, false);
     lv_obj_center(readout);
 
-    name_label = make_label(screen, &noto_sans_28);
-    lv_obj_set_width(name_label, NAME_WIDTH_PX);
-    lv_label_set_long_mode(name_label, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_style_text_align(name_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(name_label, LV_ALIGN_TOP_MID, 0, NAME_Y - 16);
-
-    // Symbols, not words: the firmware holds no translations.
-    static const char *symbols[3] = {LV_SYMBOL_PREV, LV_SYMBOL_LIST, LV_SYMBOL_NEXT};
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *b = lv_button_create(screen);
-        lv_obj_set_size(b, BUTTON_PX, BUTTON_PX);
-        lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(b, lv_color_hex(COLOR_BACKING), 0);
-        lv_obj_set_style_bg_opa(b, LV_OPA_70, 0);
-        lv_obj_set_style_border_width(b, 3, 0);
-        lv_obj_set_style_shadow_width(b, 0, 0);
-        lv_obj_align(b, LV_ALIGN_TOP_MID, (i - 1) * BUTTON_GAP_PX, BUTTONS_Y - BUTTON_PX / 2);
-        lv_obj_add_event_cb(b, on_button, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-        button_labels[i] = make_label(b, &lv_font_montserrat_28);
-        lv_label_set_text(button_labels[i], symbols[i]);
-        lv_obj_center(button_labels[i]);
-        buttons[i] = b;
-    }
-
-    bar = lv_bar_create(screen);
-    lv_obj_set_size(bar, BAR_WIDTH_PX, BAR_HEIGHT_PX);
-    lv_bar_set_range(bar, 0, 1000);
-    lv_obj_set_clickable(bar, false);
-    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, BAR_Y - BAR_HEIGHT_PX / 2);
-
-    distance_label = make_label(screen, &noto_sans_28);
-    lv_obj_align(distance_label, LV_ALIGN_TOP_MID, 0, DISTANCE_Y - 16);
+    // The bottom edge: the band behind both lines, from the edge in.
+    edge_band = make_band(screen, 90, TARGET_SPAN_DEG, READOUT_BAND_PX);
+    edge_text = make_bottom_text(screen, READOUT_RADIUS_PX);
 
     screen_set_night(false);
     screen_hide();
@@ -202,8 +195,9 @@ void screen_hide(void)
     for (size_t i = 0; i < RING_COUNT; i++) lv_obj_set_hidden(rings[i], true);
     lv_obj_set_hidden(readout, true);
     lv_obj_set_hidden(readout_band, true);
-    has_view = controls_on = false;
-    place_controls();
+    lv_obj_set_hidden(edge_band, true);
+    lv_obj_set_hidden(edge_text, true);
+    has_view = false;
     outer_ring_px = 0;
 }
 
@@ -247,31 +241,28 @@ void screen_show(const puck_view_msg_t *v, const char *target_name, float eyepie
     texts_field(v->fov_deg, field);
     snprintf(text, sizeof(text), "%s   %s", alt_az, field);
     lv_arclabel_set_text(readout, text);
-    lv_obj_set_hidden(readout, false);
-    lv_obj_set_hidden(readout_band, false);
+    // The player over the map hides the readouts and the reticle; the zoom's buttons sit
+    // where the bottom edge is.
+    bool covered = player_active();
+    lv_obj_set_hidden(readout, covered);
+    lv_obj_set_hidden(readout_band, covered);
 
     // The eyepiece view has no reticle, as the app's: its circle is drawn with the sky.
     float ring_deg = (v->flags & PUCK_VIEW_FLAG_RING) ? eyepiece_field_deg : 0;
-    if (v->fov_deg > 0 && v->fov_deg < 360) size_rings(v->fov_deg, ring_deg, !eyepiece);
+    if (v->fov_deg > 0 && v->fov_deg < 360) size_rings(v->fov_deg, ring_deg, !eyepiece && !covered);
+    if (covered) outer_ring_px = 0;
 
-    lv_label_set_text(name_label, target_name);
-    if (has_target) {
-        float d = fmaxf(0, v->target_dist_deg);
-        float close = on_target ? 1 : 1 - logf(1 + d) / logf(1 + BAR_FAR_DEG);
-        lv_bar_set_value(bar, (int32_t)(fmaxf(0, fminf(1, close)) * 1000), LV_ANIM_OFF);
-        lv_obj_set_style_bg_color(bar, lv_color_hex(night ? COLOR_NIGHT : on_target ? COLOR_ON_TARGET : COLOR_GUIDE),
-                                  LV_PART_INDICATOR);
-        snprintf(text, sizeof(text), d < 1 ? "%.2f°" : "%.1f°", d);
-        lv_label_set_text(distance_label, text);
-    }
-    place_controls();
+    // The bottom edge: the names, then how far the target is, as the bottom third's distance.
+    char away[16] = "";
+    if (has_target) snprintf(away, sizeof(away), v->target_dist_deg < 1 ? "%.2f°" : "%.1f°", fmaxf(0, v->target_dist_deg));
+    if (has_name) set_edge_text(target_name, away);
+    bool edge = has_name && !covered && !zoom_active();
+    lv_obj_set_hidden(edge_band, !edge);
+    lv_obj_set_hidden(edge_text, !edge);
 }
 
 void screen_tick(bool solving)
 {
-    // The bottom third goes after a while without a tap.
-    if (controls_on && lv_tick_elaps(controls_since) > CONTROLS_SHOW_MS) place_controls();
-
     static lv_opa_t shown = LV_OPA_COVER;
     float opacity = 1;
     if (solving) {
@@ -288,11 +279,8 @@ void screen_set_night(bool is_night)
 {
     night = is_night;
     lv_color_t text = lv_color_hex(night ? COLOR_NIGHT : COLOR_TEXT);
-    lv_obj_t *labels[] = {name_label, distance_label, button_labels[0], button_labels[1], button_labels[2]};
-    for (size_t i = 0; i < sizeof(labels) / sizeof(labels[0]); i++) lv_obj_set_style_text_color(labels[i], text, 0);
     lv_obj_set_style_text_color(readout, text, 0);
-    for (int i = 0; i < 3; i++) lv_obj_set_style_border_color(buttons[i], text, 0);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(night ? COLOR_NIGHT_BAR_BACK : COLOR_BAR_BACK), LV_PART_MAIN);
+    lv_obj_set_style_text_color(edge_text, text, 0);
     for (size_t i = 0; i < RING_COUNT; i++) lv_obj_set_style_border_color(rings[i], reticle_color(), 0);
 }
 
@@ -302,11 +290,4 @@ bool screen_is_reticle(int x, int y)
     float radius = fminf(SOLVE_TAP_MAX_RADIUS_PX, fmaxf(SOLVE_TAP_MIN_RADIUS_PX, outer_ring_px));
     int dx = x - CENTRE_PX, dy = y - CENTRE_PX;
     return dx * dx + dy * dy < radius * radius;
-}
-
-void screen_touched(void)
-{
-    controls_on = true;
-    controls_since = lv_tick_get();
-    place_controls();
 }

@@ -4,6 +4,10 @@ sdkconfig
 sdkconfig.old
 managed_components/
 
+# One merged binary to flash from the browser (README.md, "Flash from the browser"). Built
+# with a fallback Wi-Fi network in sdkconfig, it holds its password: never commit it.
+dist/
+
 # Editor and OS files (.vscode holds this computer's ESP-IDF path)
 .vscode/
 .DS_Store

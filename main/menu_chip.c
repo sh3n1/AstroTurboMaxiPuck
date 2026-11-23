@@ -63,6 +63,9 @@ static lv_style_t style_band, style_track, style_track_on, style_knob, style_kno
 
 void chip_styles_init(void)
 {
+    static bool done;
+    if (done) return; // the zoom's buttons use the bubbles too: whoever comes first
+    done = true;
     lv_style_t *all[] = {&style_page, &style_chip, &style_chip_pressed, &style_disc, &style_big, &style_sub,
                          &style_title, &style_band, &style_track, &style_track_on, &style_knob, &style_knob_on,
                          &style_level, &style_level_fill, &style_bubble, &style_bubble_on,

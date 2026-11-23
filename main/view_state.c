@@ -29,20 +29,27 @@ void view_state_set_view(const puck_view_msg_t *view)
     taskEXIT_CRITICAL(&lock);
 }
 
-void view_state_set_target(const char *name)
+// Copies text into out (VIEW_STATE_NAME_BYTES), cut to fit on a whole UTF-8 character.
+static void copy_cut(char *out, const char *text)
 {
-    char copy[VIEW_STATE_NAME_BYTES];
-    size_t len = strlen(name);
-    if (len >= sizeof(copy)) {
-        len = sizeof(copy) - 1;
+    size_t len = strlen(text);
+    if (len >= VIEW_STATE_NAME_BYTES) {
+        len = VIEW_STATE_NAME_BYTES - 1;
         // Don't cut a character in two: step back over UTF-8 continuation bytes.
-        while (len > 0 && ((unsigned char)name[len] & 0xC0) == 0x80) len--;
+        while (len > 0 && ((unsigned char)text[len] & 0xC0) == 0x80) len--;
     }
-    memcpy(copy, name, len);
-    copy[len] = '\0';
+    memcpy(out, text, len);
+    out[len] = '\0';
+}
 
+void view_state_set_target(const char *name, const char *list)
+{
+    char name_copy[VIEW_STATE_NAME_BYTES], list_copy[VIEW_STATE_NAME_BYTES];
+    copy_cut(name_copy, name);
+    copy_cut(list_copy, list);
     taskENTER_CRITICAL(&lock);
-    memcpy(state.target_name, copy, sizeof(copy));
+    memcpy(state.target_name, name_copy, sizeof(name_copy));
+    memcpy(state.target_list, list_copy, sizeof(list_copy));
     taskEXIT_CRITICAL(&lock);
 }
 
@@ -62,6 +69,7 @@ void view_state_clear(void)
     taskENTER_CRITICAL(&lock);
     state.has_view = false;
     state.target_name[0] = '\0';
+    state.target_list[0] = '\0';
     state.solving = false;
     // Night mode stays as it was: the screen mustn't flash bright when the link drops.
     taskEXIT_CRITICAL(&lock);

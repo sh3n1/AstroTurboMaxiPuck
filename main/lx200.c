@@ -175,7 +175,8 @@ static bool serve(int client)
         char ch = buffer[i];
         if (ch == ACK && !in_command) {
             reply(client, "A");
-        } else if (ch == ':') {
+        } else if (ch == ':' && !in_command) {
+            // A command starts; within one, ':' is part of it, as in ":Sr18:36:56#".
             in_command = true;
             length = 0;
         } else if (ch == '#' && in_command) {

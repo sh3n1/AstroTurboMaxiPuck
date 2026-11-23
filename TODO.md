@@ -191,8 +191,10 @@ Material Symbols icons, and what each item does.
     it, then the pairing QR. Depends on 23. *Built 2026-11-22, tested:*
     "AstroPuck-XXXX", its password made once and kept in NVS; the switch restarts the puck.
 25. **Settings → Meade LX200 Repeater**: a switch; LX200 over TCP port 4030: where the telescope
-    points, for Stellarium or SkySafari, and their GoTo becomes the target. **To fix (2026-11-23):
-    Stellarium couldn't use it on the board.** *Built 2026-11-22* (`main/lx200.c`; the app's `puck-lx200.ts`, docs/puck.md
+    points, for Stellarium or SkySafari, and their GoTo becomes the target. *Tested with Stellarium
+    2026-11-23:* it connects, shows the telescope and its GoTo sets the target (the colons
+    inside `:Sr18:36:56#` were read as new commands; fixed). **Still to look at:** its
+    crosshair jumps about during and after a GoTo; Stellarium's log would show why. *Built 2026-11-22* (`main/lx200.c`; the app's `puck-lx200.ts`, docs/puck.md
     "LX200"): `:GR#`, `:GD#` (both precisions), `:Sr`, `:Sd`, `:MS#`, and harmless answers to
     the site and version questions. The phone sends the pointing of the date once a second
     while it's on, and makes the nearest object within 2° the target on a GoTo. Set the
@@ -207,9 +209,10 @@ Material Symbols icons, and what each item does.
 
 ## Improvements
 
-- **The QR codes red in night mode** (asked 2026-11-23). The pairing, Wi-Fi and setup page
-  QR codes are still white, which ruins night vision. Draw them red at full strength on
-  black, as the rest of night mode; check the phone's camera still reads them.
+- **The QR codes red in night mode** (asked 2026-11-23). *Built 2026-11-23, to test at
+  night:* the light squares full-strength red on black (`main/qr_view.c`); check the phone's
+  camera still reads them. The code is also bigger: a 2-square border, not the standard's 4,
+  and no white beyond it.
 - **Start-up screen.** *Done 2026-11-22, tested.* The colour test is gone; the app's logo
   floats in the middle over the landing page's twinkling stars and shooting star
   (`main/splash.c`, the logo made by `tools/make_logo.py`), until the first QR code. The

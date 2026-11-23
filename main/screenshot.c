@@ -18,6 +18,7 @@
 #include "freertos/task.h"
 #include "log_history.h"
 #include "menu.h"
+#include "player.h"
 #include "screen.h"
 
 static const char *TAG = "screenshot";
@@ -84,7 +85,7 @@ static void take_and_send(void)
 }
 
 // The cable's commands that change the screen, in the LVGL task: "M" opens the menu, "B" its
-// Brightness page, "T" acts as a tap on the map, so the bottom third shows.
+// Brightness page, "T" acts as a tap on the map, so the player shows.
 static void act(void *command)
 {
     switch ((char)(intptr_t)command) {
@@ -95,7 +96,7 @@ static void act(void *command)
         menu_open_brightness();
         break;
     case 'T':
-        screen_touched();
+        player_open();
         break;
     }
 }

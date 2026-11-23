@@ -5,22 +5,29 @@
 
 #include "qr_view.h"
 
+#include <string.h>
+
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "src/libs/qrcode/qrcodegen.h" // LVGL's copy of Nayuki's QR encoder (MIT)
 
 static const char *TAG = "qr";
 
-// The light border a QR code needs around it, in squares (the standard asks for 4).
-#define QUIET_MODULES 4
-#define DARK 0x0000  // RGB565 black
-#define LIGHT 0xFFFF // RGB565 white
+// The light border a QR code needs around it, in squares. The standard asks for 4, but
+// phones read 2 well, and the code is then bigger on the small round screen.
+#define QUIET_MODULES 2
+#define DARK 0x0000        // RGB565 black: the squares, and around the light border
+#define LIGHT 0xFFFF       // RGB565 white
+#define LIGHT_NIGHT 0xF800 // RGB565 full-strength red: night mode's, which a camera still reads
+#define TEXT_MAX 512
 
 static lv_obj_t *canvas;
 static lv_draw_buf_t draw_buf;
 static uint16_t *pixels;
 static int size;
 static uint8_t *qr, *temp; // the encoder's buffers, in PSRAM
+static bool night;
+static char shown[TEXT_MAX]; // the text shown, to draw it again in the other colours
 
 lv_obj_t *qr_view_create(lv_obj_t *parent, int size_px)
 {
@@ -50,11 +57,20 @@ bool qr_view_show(const char *text)
         ESP_LOGE(TAG, "The text doesn't fit a QR code");
         return false;
     }
+    if (text != shown) strlcpy(shown, text, sizeof(shown));
     int modules = qrcodegen_getSize(qr);
-    // Whole pixels a square, as big as fits with the quiet zone; centred.
+    // Whole pixels a square, as big as fits with the quiet zone; centred. The light area is
+    // just the code and its border; around it, dark as the screen.
     int square = size / (modules + 2 * QUIET_MODULES);
     int offset = (size - square * modules) / 2;
-    for (int i = 0; i < size * size; i++) pixels[i] = LIGHT;
+    int light_from = offset - QUIET_MODULES * square, light_to = offset + (modules + QUIET_MODULES) * square;
+    uint16_t light = night ? LIGHT_NIGHT : LIGHT;
+    for (int y = 0; y < size; y++) {
+        bool in_y = y >= light_from && y < light_to;
+        for (int x = 0; x < size; x++) {
+            pixels[y * size + x] = in_y && x >= light_from && x < light_to ? light : DARK;
+        }
+    }
     for (int my = 0; my < modules; my++) {
         for (int mx = 0; mx < modules; mx++) {
             if (!qrcodegen_getModule(qr, mx, my)) continue;
@@ -67,4 +83,11 @@ bool qr_view_show(const char *text)
     ESP_LOGI(TAG, "%d by %d squares of %d px", modules, modules, square);
     lv_obj_invalidate(canvas);
     return true;
+}
+
+void qr_view_set_night(bool on)
+{
+    if (on == night) return;
+    night = on;
+    if (canvas && shown[0]) qr_view_show(shown);
 }

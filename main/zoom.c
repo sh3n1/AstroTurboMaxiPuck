@@ -11,16 +11,16 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "fonts.h"
 #include "freertos/FreeRTOS.h"
+#include "icons.h"
 #include "json_read.h"
+#include "menu_chip.h"
 
 static const char *TAG = "zoom";
 
 #define MAX_STAR_LIMITS 8
 #define BUTTON_PX 76
-#define COLOR_BUTTON 0xE8EBF5
-#define COLOR_BUTTON_NIGHT 0xFF0000
-#define COLOR_BUTTON_BG 0x05070F
 
 typedef struct {
     float min_deg, max_deg, step, start_deg;
@@ -40,7 +40,6 @@ static float field_before;     // for ✗
 static bool active;
 static uint32_t revision;
 static lv_obj_t *buttons[4];   // −, +, ✗, ✓
-static lv_obj_t *labels[4];
 
 static rules_t current_rules(void)
 {
@@ -94,9 +93,10 @@ static void show_buttons(bool show)
     for (int i = 0; i < 4; i++) lv_obj_set_hidden(buttons[i], !show);
 }
 
-// −, +, ✗ and ✓, as the button's user data 0 to 3.
+// −, +, ✗ and ✓, as the button's user data 0 to 3. A bubble hears every event: taps only.
 static void on_button(lv_event_t *event)
 {
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     int which = (int)(intptr_t)lv_event_get_user_data(event);
     rules_t r = current_rules();
     switch (which) {
@@ -117,7 +117,7 @@ static void on_button(lv_event_t *event)
 
 void zoom_create(lv_obj_t *screen)
 {
-    static const char *symbols[4] = {LV_SYMBOL_MINUS, LV_SYMBOL_PLUS, LV_SYMBOL_CLOSE, LV_SYMBOL_OK};
+    static const char *icons[4] = {ICON_REMOVE, ICON_ADD, ICON_CLOSE, ICON_CHECK};
     // − and + at the left and right edges, ✗ and ✓ low on either side, all within the circle.
     static const struct {
         lv_align_t align;
@@ -128,34 +128,17 @@ void zoom_create(lv_obj_t *screen)
         {LV_ALIGN_BOTTOM_LEFT, 90, -60},
         {LV_ALIGN_BOTTOM_RIGHT, -90, -60},
     };
+    // The menu's bubbles (menu_chip.c), which follow night mode with it: the icon bright on
+    // a dark tint, and ✓ filled, as a bubble that is on.
+    chip_styles_init();
     for (int i = 0; i < 4; i++) {
-        lv_obj_t *b = lv_button_create(screen);
-        lv_obj_set_size(b, BUTTON_PX, BUTTON_PX);
-        lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(b, lv_color_hex(COLOR_BUTTON_BG), 0);
-        lv_obj_set_style_border_width(b, 3, 0);
-        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_t *b = chip_bubble(screen, BUTTON_PX, icons[i], on_button, (void *)(intptr_t)i);
+        lv_obj_set_style_text_font(lv_obj_get_child(b, 0), &material_symbols_32, 0);
         lv_obj_align(b, places[i].align, places[i].x, places[i].y);
-        lv_obj_add_event_cb(b, on_button, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-        lv_obj_t *label = lv_label_create(b);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0);
-        lv_label_set_text(label, symbols[i]);
-        lv_obj_center(label);
+        if (i == 3) chip_bubble_set_on(b, true);
         buttons[i] = b;
-        labels[i] = label;
     }
-    zoom_set_night(false);
     show_buttons(false);
-}
-
-void zoom_set_night(bool night)
-{
-    lv_color_t color = lv_color_hex(night ? COLOR_BUTTON_NIGHT : COLOR_BUTTON);
-    for (int i = 0; i < 4; i++) {
-        if (!buttons[i]) continue;
-        lv_obj_set_style_border_color(buttons[i], color, 0);
-        lv_obj_set_style_text_color(labels[i], color, 0);
-    }
 }
 
 void zoom_open(void)
