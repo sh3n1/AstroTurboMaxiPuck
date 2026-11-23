@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "board.h"
 #include "brightness.h"
 #include "fonts.h"
 #include "icons.h"
@@ -26,6 +27,7 @@
 
 #define BACK_PX 72
 #define BACK_BOTTOM_PX 16 // between the back button and the screen's bottom edge
+#define LIST_GAP_PX 8     // between the column's cut-off and the back button
 // The main menu's bubbles, in a honeycomb of rows of 3, 2 and 3, a little above the middle,
 // clear of the title and the close button.
 #define BUBBLE_PX 96
@@ -390,7 +392,7 @@ void menu_create(lv_obj_t *screen, void (*night_switch)(void))
     chip_styles_init();
     page = chip_page_create(screen);
     lv_obj_add_event_cb(page, on_gesture, LV_EVENT_GESTURE, NULL);
-    list = chip_list_create(page);
+    list = chip_list_create(page, BOARD_SCREEN_PX - BACK_BOTTOM_PX - BACK_PX - LIST_GAP_PX);
     make_bubbles();
     make_level_box();
     title = chip_title_create(page);

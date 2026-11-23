@@ -168,8 +168,11 @@ Material Symbols icons, and what each item does.
     target as the phone's rows, with its icon (the app's own drawn from `icon` messages, or
     the closest Material Symbol) and its height and direction badge ("42° SE").
 22d. **Alignment**, guided as the app's: the easiest bright star or the target, guidance,
-    "Align" when centred, and "Remove alignment". **To fix (2026-11-23): aligning from the
-    puck didn't work on the board.** *Built 2026-11-22:*
+    "Align" when centred, and "Remove alignment". *Fixed 2026-11-23, to test on the board:* it guided
+    to the star like a target, which led the phone's camera onto it, not the telescope, so the
+    solve measured no offset. Now the star isn't made the target, and a page covers the map as
+    the app's Align page: "Centre Vega", where it is, a big round Align button, ✗ below.
+    *Built 2026-11-22:*
     the `alignStars`, `alignChoose`, `alignNow`, `alignRemove` and `alignStatus` messages
     (the app's `docs/puck.md`, "Alignment", `puck-align.service.ts`); the page in
     `main/menu_lists.c`, ✗ and Align over the map in `main/align.c`.
