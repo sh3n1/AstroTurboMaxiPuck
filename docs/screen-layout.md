@@ -45,11 +45,12 @@ The items, and what each does:
   stars and clusters) and how high and which way ("42° SE", green from 30° up, amber
   below); a target becomes the target. The ⏮ ⏭ arrows then step through that list.
 - **Alignment:** guided, as the app's: it offers the target (while it is up) and the four
-  easiest bright stars, each with where it is and how bright. One chosen becomes the
-  target, so the map guides to it, and ✗ and Align show over the map where the zoom's ✗
-  and ✓ are, with the phone's words above the reticle ("Centre Vega"). Align, once it is
-  centred in the eyepiece, plate solves on the phone; the result shows for a few seconds,
-  or why it failed, with Align to try again. While aligned, the page also shows what on,
+  easiest bright stars, each with where it is and how bright. Once one is chosen, a page
+  covers the map, as the app's Align page: "Centre Vega" at the top, where it is and the
+  hint under it, a big round Align button in the middle and ✗ at the bottom. No guidance:
+  the map isn't aligned yet, so it would lead the camera onto the star, not the telescope;
+  the user centres it in the eyepiece by eye. Align plate solves on the phone; the result
+  shows for a few seconds (Done closes it at once), or why it failed, with Retry. While aligned, the page also shows what on,
   and "Remove alignment", which asks again before removing.
 - **Zoom:** shows +, −, ✓ and ✗ over the sky map; ✓ keeps the new field, ✗ goes back. The
   puck's own zoom, apart from the phone's; it still can't pan the map. In the phone's

@@ -33,7 +33,7 @@ void chip_set_night(bool night);
 lv_obj_t *chip_page_create(lv_obj_t *screen);
 
 /** The column of chips, over the whole page, scrolling up and down. */
-lv_obj_t *chip_list_create(lv_obj_t *page);
+lv_obj_t *chip_list_create(lv_obj_t *page, int bottom_px);
 
 /** An item: icon (icons.h), word, and a state line (sub, or NULL for none) and a switch
  *  (toggle) if wanted. on_click gets data as its user data. */

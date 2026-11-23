@@ -188,17 +188,19 @@ static void on_scroll(lv_event_t *event)
     fit_to_circle(lv_event_get_target_obj(event));
 }
 
-lv_obj_t *chip_list_create(lv_obj_t *page)
+lv_obj_t *chip_list_create(lv_obj_t *page, int bottom_px)
 {
+    // It ends at bottom_px, above the close button: chips are cut off there, never over or
+    // under the button. Still the screen's middle that they snap to and shrink around.
     lv_obj_t *list = lv_obj_create(page);
     lv_obj_remove_style_all(list);
-    lv_obj_set_size(list, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_size(list, LV_PCT(100), bottom_px);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(list, CHIP_GAP_PX, 0);
     // Room above the first chip and below the last, so each can come to the middle.
     lv_obj_set_style_pad_top(list, CENTRE_PX - CHIP_HEIGHT_PX / 2, 0);
-    lv_obj_set_style_pad_bottom(list, CENTRE_PX - CHIP_HEIGHT_PX / 2, 0);
+    lv_obj_set_style_pad_bottom(list, bottom_px - CENTRE_PX - CHIP_HEIGHT_PX / 2, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scroll_snap_y(list, LV_SCROLL_SNAP_CENTER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
