@@ -66,7 +66,8 @@ app's "Two phones" mode.
 ## Open decisions (ask the user before building)
 
 1. **Where the firmware lives:** decided, this folder as its own git repository (initialised
-   2026-11-20, branches `main` and `develop`, no remote yet). The app's `AGENTS.md` notes it as
+   2026-11-20, branches `main` and `develop`), public on GitHub since 2026-11-23 at
+   https://github.com/sh3n1/AstroTurboMaxiPuck (`origin`). The app's `AGENTS.md` notes it as
    the exception to its PWA-only rule. The link is drafted in the app's `docs/puck.md`.
 2. **Toolchain:** decided, ESP-IDF (Apache-2.0) with LVGL 9 (MIT) through `esp_lvgl_port`. Not
    the Arduino core, which is LGPL. Not Waveshare's board package either: it pulls in a
