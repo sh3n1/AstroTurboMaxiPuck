@@ -34,5 +34,3 @@ uint32_t zoom_revision(void);
  *  shows its eyepiece view, whose field the puck follows. */
 void zoom_apply(puck_view_msg_t *view);
 
-/** The buttons in the day's colours or night's red. */
-void zoom_set_night(bool night);

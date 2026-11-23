@@ -25,6 +25,9 @@
 #define ICON_BACK "\xEE\x97\x84" // arrow_back, U+E5C4
 #define ICON_CLOSE "\xEE\x97\x8D" // close, U+E5CD
 #define ICON_CHECK "\xEE\x99\xA8" // check, U+E668
+#define ICON_MENU "\xEE\x97\x92" // menu, U+E5D2: 48 px only
+#define ICON_SKIP_PREVIOUS "\xEE\x81\x85" // skip_previous, U+E045: 48 px only
+#define ICON_SKIP_NEXT "\xEE\x81\x84" // skip_next, U+E044: 48 px only
 #define ICON_ADD "\xEE\x85\x85" // add, U+E145
 #define ICON_REMOVE "\xEE\x85\x9B" // remove, U+E15B
 #define ICON_STAR "\xEF\x82\x9A" // star, U+F09A

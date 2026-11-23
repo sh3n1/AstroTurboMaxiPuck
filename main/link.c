@@ -185,11 +185,22 @@ static void on_view(const char *message, size_t length)
 // A JSON message on the control channel, once the app is known.
 static void on_control(const char *text)
 {
-    // The target's name: {"t":"targetInfo","id":"M1","name":"Crab Nebula"}, id null for none.
+    // The target: {"t":"targetInfo","id":"M31","name":"Andromeda Galaxy","designations":
+    // "M31 · NGC 224",...}, id null for none. Shown as "M31 · NGC 224  Andromeda Galaxy", or
+    // once when they are the same (a planet's).
     if (strstr(text, "\"t\":\"targetInfo\"")) {
-        char name[VIEW_STATE_NAME_BYTES];
+        // "list": the list observed through, with where in it ("3/110  Messier"), or "".
+        char name[VIEW_STATE_NAME_BYTES], designations[VIEW_STATE_NAME_BYTES], list[VIEW_STATE_NAME_BYTES];
         if (!json_string(text, "name", name, sizeof(name))) name[0] = '\0';
-        view_state_set_target(name);
+        if (!json_string(text, "designations", designations, sizeof(designations))) designations[0] = '\0';
+        if (!json_string(text, "list", list, sizeof(list))) list[0] = '\0';
+        if (designations[0] && strcmp(designations, name) != 0) {
+            char both[2 * VIEW_STATE_NAME_BYTES + 2];
+            snprintf(both, sizeof(both), name[0] ? "%s  %s" : "%s%s", designations, name);
+            view_state_set_target(both, list);
+        } else {
+            view_state_set_target(name, list);
+        }
         // For the map: its label, kind and size, to draw it first and in full.
         char label[SKY_TARGET_LABEL_BYTES] = "";
         uint32_t kind = 0;

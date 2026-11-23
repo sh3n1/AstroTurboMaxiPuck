@@ -7,16 +7,20 @@ How the puck's round 466×466 screen is laid out, and what each part does.
 - **Background:** the phone's sky map, with no panning. The puck shows exactly what is visible
   on the phone's screen; there is no way to move the map from the puck.
 - **Top edge:** the Alt, Az and FOV values, written along the curve of the screen.
+- **Bottom edge** (2026-11-23), while a target is selected and the player is hidden:
+  one line, as the top's and on the same dark band, with its designations and name, then
+  how far it is ("M42 · NGC 1976  Orion Nebula   12.4°"). Too long, the name is cut with
+  "...", never the distance.
 - **Centre:** the reticle and crosshair, with directional arrows towards the target.
 - **Tapping the reticle** starts a plate solve, as it does in the phone app.
-- **Bottom third:** controls in the style of a media player, from top to bottom:
-  1. The target object, on a single line of text.
-  2. Left arrow, Menu button, right arrow.
-  3. A progress-style bar showing the distance to the object: further left means further from
-     the object, further right means closer to it.
-  4. At the bottom, centred, the angular distance to the object in degrees.
-- **Left and right arrows:** move to the previous or next item in the current list.
-- **Menu button:** opens the menu.
+- **Player** (2026-11-23; it replaced the bottom third): a tap on the map, off the reticle,
+  dims the map and shows a watch's media controls in the menu's bubbles, while the reticle
+  and both edges' readouts hide:
+  1. At the top, the list being observed through, with where in it ("3/110  Messier"), and
+     under it the target's names.
+  2. In the middle, the previous and next buttons left and right, faint when there is no
+     list, and the menu button, big and filled, in the centre.
+  3. At the bottom, ✗ to close it. It also closes after 15 s without a tap.
 
 ## Menu
 
@@ -52,7 +56,7 @@ The items, and what each does:
   the user centres it in the eyepiece by eye. Align plate solves on the phone; the result
   shows for a few seconds (Done closes it at once), or why it failed, with Retry. While aligned, the page also shows what on,
   and "Remove alignment", which asks again before removing.
-- **Zoom:** shows +, −, ✓ and ✗ over the sky map; ✓ keeps the new field, ✗ goes back. The
+- **Zoom:** shows +, −, ✓ and ✗ over the sky map, as the menu's bubbles (✓ filled); ✓ keeps the new field, ✗ goes back. The
   puck's own zoom, apart from the phone's; it still can't pan the map. In the phone's
   eyepiece view it follows the eyepiece's field.
 - **Night mode:** a switch, in step with the phone. Only here: no long press on the map

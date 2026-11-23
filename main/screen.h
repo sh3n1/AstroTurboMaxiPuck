@@ -3,10 +3,9 @@
 //
 // The puck's main screen, over the sky map (docs/screen-layout.md): the readout along the
 // top edge; the reticle in the centre, green on target, pulsing while the app plate solves;
-// and, in the bottom third, media-player style, the target's name, the previous, Menu and
-// next buttons, a bar for how close the target is, and its distance in degrees. The bottom
-// third shows after a tap on the map, and goes again after a while without one. The
-// guidance chevrons are drawn with the sky (sky_objects.c). Day colours or night's red.
+// and along the bottom edge the target's names and distance. All hidden while the player
+// (player.c) is over the map. The guidance chevrons are drawn with the sky (sky_objects.c).
+// Day colours or night's red.
 
 #pragma once
 
@@ -33,9 +32,6 @@ void screen_tick(bool solving);
 
 /** The day's colours or night's full-strength red. */
 void screen_set_night(bool night);
-
-/** A tap on the map, not on the reticle: shows the bottom third for a while. */
-void screen_touched(void);
 
 /** True when a tap at (x, y) is on the reticle, where it starts a plate solve. */
 bool screen_is_reticle(int x, int y);

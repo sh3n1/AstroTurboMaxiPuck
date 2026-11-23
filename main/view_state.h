@@ -13,7 +13,7 @@
 
 #include "puck_protocol.h"
 
-#define VIEW_STATE_NAME_BYTES 64
+#define VIEW_STATE_NAME_BYTES 128 // the designations and the name
 
 /** The phone's view, as the app's view tile steps through them. */
 typedef enum { VIEW_MODE_SKY, VIEW_MODE_EYEPIECE, VIEW_MODE_RING } view_mode_t;
@@ -33,6 +33,7 @@ typedef struct {
     int64_t view_time_us;                  // esp_timer time the view arrived
     uint32_t view_count;                   // views taken since start, to tell a new one
     char target_name[VIEW_STATE_NAME_BYTES]; // UTF-8, empty when there is no target
+    char target_list[VIEW_STATE_NAME_BYTES]; // the list observed through ("3/110  Messier"), or empty
     bool night;                            // the app's night mode
     bool solving;                          // the app is plate solving
     bool sensors_on;                       // the phone's motion sensors are on
@@ -43,8 +44,9 @@ typedef struct {
 /** Takes a new view, unless it's older than the last (by its wrapping `seq`). */
 void view_state_set_view(const puck_view_msg_t *view);
 
-/** The target's name, or "" for none. Cut to fit, on a whole UTF-8 character. */
-void view_state_set_target(const char *name);
+/** The target's name, or "" for none, and the list's line, or "". Cut to fit, on a whole
+ *  UTF-8 character. */
+void view_state_set_target(const char *name, const char *list);
 
 /** The app's state message. */
 void view_state_set_app_state(const view_state_app_t *app);

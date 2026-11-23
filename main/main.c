@@ -30,6 +30,7 @@
 #include "log_history.h"
 #include "qr_view.h"
 #include "menu.h"
+#include "player.h"
 #include "screen.h"
 #include "screenshot.h"
 #include "sky_draw.h"
@@ -93,7 +94,7 @@ static void log_board_info(void)
 }
 
 // A short tap on the reticle plate solves (docs/puck.md, "Control messages"); anywhere else
-// on the map it shows the bottom third, whose buttons take their own taps (screen.c). Runs in the LVGL task; the link sends the
+// on the map it shows the player, whose buttons take their own taps (player.c). Runs in the LVGL task; the link sends the
 // command from its own task.
 static void on_tap(lv_event_t *event)
 {
@@ -104,11 +105,11 @@ static void on_tap(lv_event_t *event)
     view_state_t state;
     view_state_get(&state);
     // While zooming or aligning, only their own buttons do anything.
-    if (!state.has_view || zoom_active() || align_active() || menu_active()) return;
+    if (!state.has_view || zoom_active() || align_active() || menu_active() || player_active()) return;
     if (screen_is_reticle(point.x, point.y)) {
         if (!state.solving) link_send_command("{\"t\":\"solveNow\",\"trigger\":\"tap\"}");
     } else {
-        screen_touched(); // anywhere else on the map: the bottom third shows
+        player_open(); // anywhere else on the map: the player shows
     }
 }
 
@@ -130,7 +131,7 @@ static void apply_palette(bool night)
     lv_obj_set_style_text_color(status_label, text, 0);
     lv_obj_set_style_text_color(link_label, text, 0);
     screen_set_night(night);
-    zoom_set_night(night);
+    qr_view_set_night(night);
     align_set_night(night);
     menu_set_night(night);
 }
@@ -165,25 +166,30 @@ static void refresh_view(lv_timer_t *timer)
     screen_tick(state.solving);
     menu_show_state(&state);
     align_update();
+    player_tick();
+    player_set_text(state.target_list, state.target_name);
     // The menu covers the map, which waits; it closes when the link goes (once: it can still
     // be opened over the cable for a screenshot, screenshot.c).
     if (!state.has_view && shown_view) {
         menu_close();
         align_close();
+        player_close();
     }
     if (menu_active()) return;
-    static uint32_t shown_zoom;
+    static uint32_t shown_zoom, shown_player;
     // The view on the screen, gliding towards the newest (view_glide.c), and while it moves.
     static puck_view_msg_t glided;
     static bool gliding;
     static int64_t last_frame_us;
     if (!gliding && !night_changed && state.has_view == shown_view && state.view_count == shown_count &&
-        strcmp(state.target_name, shown_target) == 0 && zoom_revision() == shown_zoom) {
+        strcmp(state.target_name, shown_target) == 0 && zoom_revision() == shown_zoom &&
+        player_revision() == shown_player) {
         return; // nothing new
     }
     shown_view = state.has_view;
     shown_count = state.view_count;
     shown_zoom = zoom_revision();
+    shown_player = player_revision();
     strcpy(shown_target, state.target_name);
     // The Wi-Fi and link lines show until the first view, where the bottom third goes.
     lv_obj_set_hidden(status_label, state.has_view);
@@ -258,6 +264,7 @@ static void build_screen(void)
     link_label = make_status_label(screen, -75);
     zoom_create(screen);
     align_create(screen);
+    player_create(screen);
     lv_timer_create(refresh_view, VIEW_REFRESH_MS, NULL);
 
     // Dark squares on white, as cameras read best, with the quiet zone around it (qr_view.c).

@@ -83,7 +83,7 @@ void lists_parse_lists(const char *json)
             !json_string(item, "name", list->name, sizeof(list->name))) {
             continue;
         }
-        json_uint(item, "count", &count);
+        json_uint(item, "count", &count); // how many targets it has, as the phone's Lists page
         snprintf(list->sub, sizeof(list->sub), "%u", (unsigned)count);
         list->icon[0] = list->badge[0] = '\0';
         list->high = false;
