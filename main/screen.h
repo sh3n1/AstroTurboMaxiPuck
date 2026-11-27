@@ -30,6 +30,9 @@ void screen_hide(void);
 /** Call on every refresh: the reticle pulses while the app plate solves, as the app's. */
 void screen_tick(bool solving);
 
+/** A plate solve failed: the reticle turns amber for a moment (blinks, at night). */
+void screen_solve_failed(void);
+
 /** The day's colours or night's full-strength red. */
 void screen_set_night(bool night);
 
