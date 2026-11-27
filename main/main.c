@@ -27,6 +27,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "link.h"
+#include "field_log.h"
 #include "log_history.h"
 #include "qr_view.h"
 #include "menu.h"
@@ -57,17 +58,25 @@ static lv_obj_t *status_label;
 static lv_obj_t *link_label;
 // The pairing QR code, in the middle, shown until the app links.
 static lv_obj_t *pairing_qr;
+// Its brightness step (QR_BRIGHTNESS), and a QR code waiting for the screen to dim before
+// it shows. Both in the LVGL task, or with LVGL locked.
+static unsigned qr_step;
+static bool qr_waiting;
 
 // The QR code's size, quiet zone included: as big as fits inside the round screen with the
 // status lines under it, for big squares a phone camera reads at arm's length.
 #define QR_SIZE_PX 300
 #define QR_RAISE_PX (-30)
-// While the QR code shows, the screen's brightness beats slowly between these, so a phone
-// camera dazzled by the bright white AMOLED gets a darker moment in every beat to read it.
-#define QR_BEAT_PERIOD_MS 6000
-#define QR_BEAT_DIM 50     // of 255
-#define QR_BEAT_BRIGHT 255
-#define QR_BEAT_STEP_MS 50
+// A QR code shows when the link drops, often at night: it always comes up red at the
+// screen's lowest brightness, never a white flash. Each tap on the screen brightens it a
+// step, through these brightnesses (of 255) in red, then the same in white, then back to
+// the first. A dazzled phone camera reads a dimmer step better.
+static const uint8_t QR_BRIGHTNESS[] = {10, 30, 90, 150, 255};
+#define QR_STEPS_PER_COLOUR (sizeof(QR_BRIGHTNESS) / sizeof(QR_BRIGHTNESS[0]))
+#define QR_STEPS (2 * QR_STEPS_PER_COLOUR)
+#define BRIGHTNESS_STEP_MS 50
+// The start-up screen's brightness (of 255), low too, whatever the menu's setting.
+#define SPLASH_BRIGHTNESS 30
 
 // How often the screen looks at the shared view state.
 #define VIEW_REFRESH_MS 33
@@ -93,6 +102,20 @@ static void log_board_info(void)
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
 }
 
+// The status lines' colour: red with a red QR code or the start-up screen, as with night
+// mode; else the palette's.
+// With LVGL locked.
+static bool night_shown;
+
+static void color_status(void)
+{
+    bool qr = pairing_qr && (qr_waiting || !lv_obj_is_hidden(pairing_qr));
+    bool red = night_shown || splash_shown() || (qr && qr_step < QR_STEPS_PER_COLOUR);
+    lv_color_t text = lv_color_hex(red ? COLOR_NIGHT : COLOR_TEXT);
+    lv_obj_set_style_text_color(status_label, text, 0);
+    lv_obj_set_style_text_color(link_label, text, 0);
+}
+
 // A short tap on the reticle plate solves (docs/puck.md, "Control messages"); anywhere else
 // on the map it shows the player, whose buttons take their own taps (player.c). Runs in the LVGL task; the link sends the
 // command from its own task.
@@ -101,6 +124,14 @@ static void on_tap(lv_event_t *event)
     lv_point_t point;
     lv_indev_get_point(lv_indev_active(), &point);
     ESP_LOGI(TAG, "Tap at %d, %d", (int)point.x, (int)point.y);
+
+    // Over a QR code, a tap brightens it a step (apply_brightness).
+    if (pairing_qr && !lv_obj_is_hidden(pairing_qr)) {
+        qr_step = (qr_step + 1) % QR_STEPS;
+        qr_view_set_red(qr_step < QR_STEPS_PER_COLOUR);
+        color_status();
+        return;
+    }
 
     view_state_t state;
     view_state_get(&state);
@@ -126,12 +157,10 @@ static void switch_night(void)
 // Everything in the day's colours, or night's full-strength red.
 static void apply_palette(bool night)
 {
-    const lv_color_t text = lv_color_hex(night ? COLOR_NIGHT : COLOR_TEXT);
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(night ? COLOR_NIGHT_SKY : COLOR_SKY), 0);
-    lv_obj_set_style_text_color(status_label, text, 0);
-    lv_obj_set_style_text_color(link_label, text, 0);
+    night_shown = night;
+    color_status();
     screen_set_night(night);
-    qr_view_set_night(night);
     align_set_night(night);
     menu_set_night(night);
 }
@@ -157,12 +186,20 @@ static void refresh_view(lv_timer_t *timer)
     static bool shown_view, shown_night;
     view_state_t state;
     view_state_get(&state);
+    // Red until the phone says otherwise: from start-up, and from linking until the app's
+    // state arrives, so a phone in night mode never sees a white line first.
+    if (!state.has_state) state.night = true;
     bool night_changed = state.night != shown_night;
     if (night_changed) {
         shown_night = state.night;
         apply_palette(state.night);
     }
-    // Plate solving: the reticle pulses until it ends, as the app's.
+    // Plate solving: the reticle pulses until it ends, as the app's, and says when it failed.
+    static uint32_t shown_failures;
+    if (state.solve_failures != shown_failures) {
+        shown_failures = state.solve_failures;
+        screen_solve_failed();
+    }
     screen_tick(state.solving);
     menu_show_state(&state);
     align_update();
@@ -218,7 +255,7 @@ static void refresh_view(lv_timer_t *timer)
 
 // The panel starts off and dark (board.c), so nothing shows before the start-up screen,
 // not even the white its memory may hold: on, once LVGL has drawn and sent its first frame,
-// in the LVGL task. The brightness rises after, from beat_qr's next step.
+// in the LVGL task. The brightness rises after, from apply_brightness's next step.
 static bool screen_on;
 
 static void on_first_frame(lv_event_t *event)
@@ -228,22 +265,25 @@ static void on_first_frame(lv_event_t *event)
     board_screen_on();
 }
 
-// The QR code's slow heartbeat. An LVGL timer, so it runs in the LVGL task, which also
-// sends the screen its pixels: the brightness command never crosses a frame being sent.
-static void beat_qr(lv_timer_t *timer)
+// The screen's brightness: the menu's setting, or the QR code's step while one shows. An
+// LVGL timer, so it runs in the LVGL task, which also sends the screen its pixels: the
+// brightness command never crosses a frame being sent.
+static void apply_brightness(lv_timer_t *timer)
 {
     static int shown = -1;
     if (!screen_on) return; // dark until the first frame is on the screen
-    int level = brightness_level(); // the menu's Settings, Brightness
-    if (pairing_qr && !lv_obj_is_hidden(pairing_qr)) {
-        // A smooth swell from dim to bright and back, once a period.
-        float phase = (float)(lv_tick_get() % QR_BEAT_PERIOD_MS) / QR_BEAT_PERIOD_MS;
-        float swell = 0.5f - 0.5f * cosf(2 * (float)M_PI * phase);
-        level = QR_BEAT_DIM + (int)((QR_BEAT_BRIGHT - QR_BEAT_DIM) * swell);
-    }
+    bool qr = pairing_qr && (qr_waiting || !lv_obj_is_hidden(pairing_qr));
+    int level = qr               ? QR_BRIGHTNESS[qr_step % QR_STEPS_PER_COLOUR]
+                : splash_shown() ? SPLASH_BRIGHTNESS
+                                 : brightness_level();
     if (level != shown) {
         board_set_brightness((uint8_t)level);
         shown = level;
+    }
+    // A new QR code shows only now the screen is dim, so it never flashes.
+    if (qr_waiting) {
+        qr_waiting = false;
+        lv_obj_set_hidden(pairing_qr, false);
     }
 }
 
@@ -262,16 +302,17 @@ static void build_screen(void)
     splash_create(screen);
     status_label = make_status_label(screen, -40);
     link_label = make_status_label(screen, -75);
+    color_status();
     zoom_create(screen);
     align_create(screen);
     player_create(screen);
     lv_timer_create(refresh_view, VIEW_REFRESH_MS, NULL);
 
-    // Dark squares on white, as cameras read best, with the quiet zone around it (qr_view.c).
+    // Dark squares on red or white, with the quiet zone around it (qr_view.c).
     // A little above the centre, clear of the status lines under it.
     pairing_qr = qr_view_create(screen, QR_SIZE_PX);
     if (pairing_qr) lv_obj_align(pairing_qr, LV_ALIGN_CENTER, 0, QR_RAISE_PX);
-    lv_timer_create(beat_qr, QR_BEAT_STEP_MS, NULL);
+    lv_timer_create(apply_brightness, BRIGHTNESS_STEP_MS, NULL);
     menu_create(screen, switch_night); // last: over everything, the QR code too
     // The display on once LVGL has drawn and sent this screen (on_first_frame).
     lv_display_add_event_cb(lv_display_get_default(), on_first_frame, LV_EVENT_REFR_READY, NULL);
@@ -288,8 +329,15 @@ static bool pairing_held;
 // With LVGL locked.
 static void show_qr(const char *text)
 {
-    if (pairing_qr && qr_view_show(text)) lv_obj_set_hidden(pairing_qr, false);
+    if (!pairing_qr) return;
+    // A QR code coming up starts at the first step, red and dim, shown once the screen is.
+    if (lv_obj_is_hidden(pairing_qr) && !qr_waiting) {
+        qr_step = 0;
+        qr_view_set_red(true);
+    }
+    if (qr_view_show(text) && lv_obj_is_hidden(pairing_qr)) qr_waiting = true;
     splash_hide(); // the start-up screen until the first QR code
+    color_status();
 }
 
 static void show_pairing_now(void)
@@ -323,7 +371,11 @@ static void show_link_state(const char *text)
 {
     lvgl_port_lock(0);
     lv_label_set_text(link_label, text);
-    if (strcmp(text, "Linked") == 0 && pairing_qr) lv_obj_set_hidden(pairing_qr, true);
+    if (strcmp(text, "Linked") == 0 && pairing_qr) {
+        qr_waiting = false;
+        lv_obj_set_hidden(pairing_qr, true);
+        color_status();
+    }
     lvgl_port_unlock();
 }
 
@@ -332,6 +384,8 @@ static void show_link_state(const char *text)
 static void on_wifi_change(wifi_state_t state, const char *ip)
 {
     static bool link_started = false;
+    // The log over the Wi-Fi, in a field build: only with an address on the user's network.
+    field_log_network_up(state == WIFI_CONNECTED);
     if ((state == WIFI_CONNECTED || state == WIFI_OWN_WAITING) && !link_started) {
         static const link_callbacks_t callbacks = {
             .show_pairing = show_pairing,
@@ -377,6 +431,7 @@ static void on_wifi_change(wifi_state_t state, const char *ip)
 void app_main(void)
 {
     log_history_start();
+    field_log_start(); // the log over the Wi-Fi, in a field build only
     // After a reset the board's USB port takes about a second to reconnect to the computer,
     // and anything logged before that is lost. Wait, so the monitor sees the board info.
     vTaskDelay(pdMS_TO_TICKS(2000));

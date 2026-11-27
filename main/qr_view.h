@@ -19,5 +19,6 @@ lv_obj_t *qr_view_create(lv_obj_t *parent, int size_px);
 /** Draws text as a QR code, as big as the square allows, with its quiet zone. */
 bool qr_view_show(const char *text);
 
-/** Night mode: the light squares full-strength red instead of white, as all of night mode. */
-void qr_view_set_night(bool night);
+/** The light squares full-strength red, or white. The QR code starts red, so it never
+ *  dazzles in the dark (main.c's brightness steps). */
+void qr_view_set_red(bool red);

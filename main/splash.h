@@ -3,7 +3,8 @@
 //
 // The start-up screen: the app's logo in the middle, floating gently, over the landing page's
 // sky: two layers of twinkling stars and now and then a shooting star (the app's
-// src/landing/styles.css). Shown from start-up until the first QR code.
+// src/landing/styles.css), all in red, as night mode, so it never dazzles in the dark.
+// Shown from start-up until the first QR code.
 
 #pragma once
 
@@ -14,3 +15,6 @@ void splash_create(lv_obj_t *screen);
 
 /** Stops its animations and removes it. LVGL locked; does nothing once gone. */
 void splash_hide(void);
+
+/** True while it shows. */
+bool splash_shown(void);
