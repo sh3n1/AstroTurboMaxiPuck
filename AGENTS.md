@@ -38,7 +38,7 @@ app's "Two phones" mode.
   - **The link resends both ways since 2026-11-21:** the puck now resends what the phone
     doesn't acknowledge (`components/libpeer/src/sctp.c`, `sctp_resend_due`).
   - Build steps are in `README.md`, libraries and their licences in `docs/third-party.md`.
-    The battery (AXP2101) waits until the user has one.
+    No battery of its own, ever (decided 2026-11-27): it runs from USB (a power bank).
 
 ## Decisions taken
 

@@ -18,7 +18,7 @@ static const char *TAG = "qr";
 #define QUIET_MODULES 2
 #define DARK 0x0000        // RGB565 black: the squares, and around the light border
 #define LIGHT 0xFFFF       // RGB565 white
-#define LIGHT_NIGHT 0xF800 // RGB565 full-strength red: night mode's, which a camera still reads
+#define LIGHT_RED 0xF800   // RGB565 full-strength red, which a camera still reads
 #define TEXT_MAX 512
 
 static lv_obj_t *canvas;
@@ -26,7 +26,7 @@ static lv_draw_buf_t draw_buf;
 static uint16_t *pixels;
 static int size;
 static uint8_t *qr, *temp; // the encoder's buffers, in PSRAM
-static bool night;
+static bool red = true;
 static char shown[TEXT_MAX]; // the text shown, to draw it again in the other colours
 
 lv_obj_t *qr_view_create(lv_obj_t *parent, int size_px)
@@ -64,7 +64,7 @@ bool qr_view_show(const char *text)
     int square = size / (modules + 2 * QUIET_MODULES);
     int offset = (size - square * modules) / 2;
     int light_from = offset - QUIET_MODULES * square, light_to = offset + (modules + QUIET_MODULES) * square;
-    uint16_t light = night ? LIGHT_NIGHT : LIGHT;
+    uint16_t light = red ? LIGHT_RED : LIGHT;
     for (int y = 0; y < size; y++) {
         bool in_y = y >= light_from && y < light_to;
         for (int x = 0; x < size; x++) {
@@ -85,9 +85,9 @@ bool qr_view_show(const char *text)
     return true;
 }
 
-void qr_view_set_night(bool on)
+void qr_view_set_red(bool on)
 {
-    if (on == night) return;
-    night = on;
+    if (on == red) return;
+    red = on;
     if (canvas && shown[0]) qr_view_show(shown);
 }

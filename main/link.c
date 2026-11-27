@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -23,6 +24,7 @@
 #include "lists.h"
 #include "lx200.h"
 #include "sky_icons.h"
+#include "sky_labels.h"
 #include "sky_objects.h"
 #include "moving.h"
 #include "peer.h"
@@ -226,6 +228,15 @@ static void on_control(const char *text)
         view_state_set_app_state(&app);
         ESP_LOGI(TAG, "State: night %d, solving %d, sensors %d, view %s", app.night, app.solving, app.sensors_on,
                  view);
+    }
+    // Each plate solve attempt as it ends: {"t":"solveLog","entry":{"outcome":"failed",...}}.
+    // "retry" is the app trying again on its own (the phone moved, a lower ISO): not a failure.
+    else if (strstr(text, "\"t\":\"solveLog\"")) {
+        char outcome[16] = "", message[160] = "";
+        json_string(text, "outcome", outcome, sizeof(outcome));
+        json_string(text, "message", message, sizeof(message));
+        if (strcmp(outcome, "failed") == 0) view_state_solve_failed();
+        ESP_LOGI(TAG, "Plate solve %s: %s", outcome, message);
     }
     // The app's record of the link lost before: {"t":"appLog","text":"..."}, kept in the log.
     else if (strstr(text, "\"t\":\"appLog\"")) {
@@ -551,11 +562,17 @@ static void link_task(void *arg)
         static int64_t memory_logged;
         if (now - memory_logged > 5 * 1000 * 1000) {
             memory_logged = now;
-            ESP_LOGI(TAG, "Free internal %u KB (lowest %u KB, largest block %u KB), PSRAM %u KB",
+            // The kept labels grow as the map shows new parts of the sky, up to a limit:
+            // shown apart, so that growth isn't taken for a leak.
+            ESP_LOGI(TAG, "Free internal %u KB (lowest %u KB, largest block %u KB), PSRAM %u KB (labels kept %u KB)",
                      (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
                      (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024),
                      (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
-                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+                     (unsigned)(sky_labels_kept_bytes() / 1024));
+            // The Wi-Fi signal, to tell a weak network from other causes of a lost link.
+            wifi_ap_record_t ap;
+            if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ESP_LOGI(TAG, "Wi-Fi signal %d dBm", ap.rssi);
             if (authenticated) {
                 uint32_t data_in, sacks_in, sack_cum, next_tsn, heartbeats, write_errors, resent;
                 peer_connection_sctp_stats(connection, &data_in, &sacks_in, &sack_cum, &next_tsn, &heartbeats,

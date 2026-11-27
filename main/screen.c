@@ -39,6 +39,13 @@ static const float RETICLE_DIAMETERS_DEG[] = {0.5f, 2.0f, 4.0f};
 // While plate solving the reticle fades out and back once this often, never below this.
 #define PULSE_PERIOD_MS 1200
 #define PULSE_MIN_OPACITY 0.25f
+// A failed plate solve: the reticle turns the app's warning amber for a moment. At night,
+// with red only, it blinks instead: off and on, each this long.
+#define FAILED_MS 1500
+#define FAILED_BLINK_MS 250
+#define COLOR_FAILED 0xFFB454
+// And an X this wide in the reticle's centre meanwhile, drawn as thick as the rings.
+#define FAILED_X_PX 56
 // A tap this near the centre, or inside the outer ring if bigger, plate solves; but never
 // where the bottom third's controls are.
 #define SOLVE_TAP_MIN_RADIUS_PX 90
@@ -59,6 +66,8 @@ static const float RETICLE_DIAMETERS_DEG[] = {0.5f, 2.0f, 4.0f};
 #define TARGET_GAP "   "
 
 static lv_obj_t *rings[RING_COUNT];
+static lv_obj_t *failed_x;       // the X, holding its two strokes
+static lv_obj_t *failed_strokes[2];
 static lv_obj_t *readout;
 static lv_obj_t *readout_band;
 static lv_obj_t *edge_band, *edge_text;
@@ -67,6 +76,8 @@ static bool night;
 static bool on_target;
 static bool has_view, has_name, has_target;
 static float outer_ring_px; // the reticle's outer ring, for taps
+static bool failed;         // showing a failed plate solve
+static uint32_t failed_at;  // since when (lv_tick_get)
 
 // A dark band along the edge, centred on centre_deg (LVGL's: 90 is the bottom, 270 the top).
 static lv_obj_t *make_band(lv_obj_t *screen, int centre_deg, int span_deg, int width_px)
@@ -156,6 +167,27 @@ void screen_create(lv_obj_t *screen)
         rings[i] = ring;
     }
 
+    // The failed solve's X: two strokes corner to corner, rounded as the target's crosshair.
+    static const lv_point_precise_t strokes[2][2] = {
+        {{0, 0}, {FAILED_X_PX, FAILED_X_PX}},
+        {{0, FAILED_X_PX}, {FAILED_X_PX, 0}},
+    };
+    failed_x = lv_obj_create(screen);
+    lv_obj_remove_style_all(failed_x);
+    lv_obj_set_size(failed_x, FAILED_X_PX + RING_WIDTH_PX, FAILED_X_PX + RING_WIDTH_PX);
+    lv_obj_set_style_pad_all(failed_x, RING_WIDTH_PX / 2, 0);
+    lv_obj_center(failed_x);
+    lv_obj_set_clickable(failed_x, false);
+    for (size_t i = 0; i < 2; i++) {
+        lv_obj_t *line = lv_line_create(failed_x);
+        lv_line_set_points(line, strokes[i], 2);
+        lv_obj_set_style_line_width(line, RING_WIDTH_PX, 0);
+        lv_obj_set_style_line_rounded(line, true, 0);
+        lv_obj_set_clickable(line, false);
+        failed_strokes[i] = line;
+    }
+    lv_obj_set_hidden(failed_x, true);
+
     // Along the top edge, centred on its top, read left to right, over a dark band.
     readout_band = lv_arc_create(screen);
     lv_obj_set_size(readout_band, BOARD_SCREEN_PX, BOARD_SCREEN_PX);
@@ -193,6 +225,7 @@ void screen_create(lv_obj_t *screen)
 void screen_hide(void)
 {
     for (size_t i = 0; i < RING_COUNT; i++) lv_obj_set_hidden(rings[i], true);
+    lv_obj_set_hidden(failed_x, true);
     lv_obj_set_hidden(readout, true);
     lv_obj_set_hidden(readout_band, true);
     lv_obj_set_hidden(edge_band, true);
@@ -201,10 +234,18 @@ void screen_hide(void)
     outer_ring_px = 0;
 }
 
-// The reticle's colour: green on target, red otherwise; night's red either way.
+// The reticle's colour: amber just after a failed solve, green on target, red otherwise;
+// night's red always.
 static lv_color_t reticle_color(void)
 {
-    return lv_color_hex(night ? COLOR_NIGHT : on_target ? COLOR_ON_TARGET : COLOR_RETICLE);
+    if (night) return lv_color_hex(COLOR_NIGHT);
+    return lv_color_hex(failed ? COLOR_FAILED : on_target ? COLOR_ON_TARGET : COLOR_RETICLE);
+}
+
+static void color_rings(void)
+{
+    for (size_t i = 0; i < RING_COUNT; i++) lv_obj_set_style_border_color(rings[i], reticle_color(), 0);
+    for (size_t i = 0; i < 2; i++) lv_obj_set_style_line_color(failed_strokes[i], reticle_color(), 0);
 }
 
 // Sizes the rings for a field of view, with the app's stereographic projection: a ring d
@@ -261,11 +302,28 @@ void screen_show(const puck_view_msg_t *v, const char *target_name, float eyepie
     lv_obj_set_hidden(edge_text, !edge);
 }
 
+void screen_solve_failed(void)
+{
+    failed = true;
+    failed_at = lv_tick_get();
+    color_rings();
+    // In the reticle's centre, while there is a map and nothing covers it.
+    lv_obj_set_hidden(failed_x, !has_view || player_active());
+}
+
 void screen_tick(bool solving)
 {
     static lv_opa_t shown = LV_OPA_COVER;
     float opacity = 1;
-    if (solving) {
+    uint32_t since_failed = lv_tick_elaps(failed_at);
+    if (failed && since_failed >= FAILED_MS) {
+        failed = false;
+        color_rings();
+        lv_obj_set_hidden(failed_x, true);
+    }
+    if (failed && night) {
+        opacity = (since_failed / FAILED_BLINK_MS) % 2 == 0 ? 0 : 1;
+    } else if (solving && !failed) {
         float wave = 0.5f + 0.5f * cosf(2 * (float)M_PI * (lv_tick_get() % PULSE_PERIOD_MS) / PULSE_PERIOD_MS);
         opacity = PULSE_MIN_OPACITY + (1 - PULSE_MIN_OPACITY) * wave;
     }
@@ -281,7 +339,7 @@ void screen_set_night(bool is_night)
     lv_color_t text = lv_color_hex(night ? COLOR_NIGHT : COLOR_TEXT);
     lv_obj_set_style_text_color(readout, text, 0);
     lv_obj_set_style_text_color(edge_text, text, 0);
-    for (size_t i = 0; i < RING_COUNT; i++) lv_obj_set_style_border_color(rings[i], reticle_color(), 0);
+    color_rings();
 }
 
 bool screen_is_reticle(int x, int y)

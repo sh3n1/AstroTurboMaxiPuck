@@ -10,6 +10,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "lvgl.h"
@@ -30,3 +31,6 @@ bool sky_labels_full(void);
 
 /** Draws the labels placed this frame into the canvas's pixels. */
 void sky_labels_draw(void);
+
+/** About how much memory the kept labels take, for the log. Read from any task. */
+size_t sky_labels_kept_bytes(void);

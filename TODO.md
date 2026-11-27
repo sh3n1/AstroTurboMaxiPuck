@@ -147,10 +147,10 @@ Material Symbols icons, and what each item does.
 21. **Settings → Brightness**: − and +, kept in NVS (`main/brightness.c`). *Built
     2026-11-22.*
 22. **Sensors**: a switch for the phone's motion sensors. *Built 2026-11-22 (the
-    `sensors` command), to test on the board.*
+    `sensors` command), tested.*
 22a. **View**: steps the phone through the sky map, eyepiece view and field ring, as the
-    app's view tile. *Built 2026-11-22 (the `view` command, and the view in `state`), to
-    test on the board.*
+    app's view tile. *Built 2026-11-22 (the `view` command, and the view in `state`),
+    tested.*
 22b. **Zoom.** *Done 2026-11-21, tested (works, not yet smooth).* The puck zooms on its own,
     apart from the phone (decided 2026-11-21): `main/zoom.c` keeps its field, and shows +,
     −, ✓ and ✗ over the map; ✓ keeps the new field, ✗ goes back. The rules (5° to 120°,
@@ -158,7 +158,7 @@ Material Symbols icons, and what each item does.
     phone's eyepiece view the puck follows the eyepiece's field. Later: keep the field in
     NVS.
 22c. **Lists**: the phone's lists, then a list's targets; choosing one makes it the target,
-    and the arrows step through that list. *Built 2026-11-22, to test on the board:* the
+    and the arrows step through that list. *Built 2026-11-22, tested:* the
     `lists`, `listTargets` and `play` messages (the app's `docs/puck.md`, "Lists",
     `puck-lists.ts`; the puck's `main/lists.c`). Offered: Best right now, In the reticle,
     the user's lists, Messier and Caldwell; only the targets above the horizon, up to 60.
@@ -202,20 +202,68 @@ Material Symbols icons, and what each item does.
 
 ## 5. Power
 
-26. **Battery** (AXP2101, XPowersLib, MIT, keep its attribution): battery level on screen,
-    charging, low-battery warning. Waits for a battery.
-27. **Power saving**: screen off after a while, wake on touch or movement (QMI8658 IMU),
-    PWR button to sleep and switch off. Depends on 26.
+Decided 2026-11-27: the puck will never have a battery of its own; it runs from USB (a
+power bank). No battery level, charging or AXP2101 work.
+
+27. **Power saving** (perhaps): screen off after a while, wake on touch or movement
+    (QMI8658 IMU).
 
 ## Improvements
 
-- **The QR codes red in night mode** (asked 2026-11-23). *Built 2026-11-23, to test at
-  night:* the light squares full-strength red on black (`main/qr_view.c`); check the phone's
-  camera still reads them. The code is also bigger: a 2-square border, not the standard's 4,
-  and no white beyond it.
+- **The puck's map with sky up** (decided at the second field test, 2026-11-26). The app
+  sends the puck a roll worked out from the top of the phone's screen (`screenUpDirection`
+  and `viewRollDeg` in `sensor.service.ts`, then `puck-view.ts`), so when the phone's screen
+  rotates the puck's map and arrow turn 90°; likely the "wrong" arrow of the first test.
+  The puck is in the hand: up on it is always up in the sky, horizon level, whatever the
+  phone's screen or mount. App side only.
+- **Guidance the mount can follow** (asked at the second field test, 2026-11-26). The arrow
+  points along the shortest path on the sky (`targetDirectionDeg` in `puck-view.ts`, the
+  great circle), which near the zenith goes over it: an alt-az mount (a Dobson) can't
+  follow that. Proposed: aim the arrow at a point a little way along the mount's own path,
+  a straight line in altitude and azimuth (azimuth the short way round, altitude never past
+  90°); the distance shown stays the true one. Works for every alt-az mount whatever the
+  telescope. The phone's own guidance should match. Alt-az only for now (decided
+  2026-11-26: no equatorial mount to test with); later, an equatorial mount would guide in
+  hour angle and declination, behind a mount setting the app doesn't have yet.
+- **Field tests: plate solve the telescope camera's pictures** (asked at the first field
+  test, 2026-11-25). Today the ZWO only says whether the target is in its small field
+  (0.27 x 0.15 deg at 1200 mm); solved, it would say exactly where the telescope pointed,
+  so the app's error could be measured in degrees at every solve. Options: astrometry.net's
+  online service (free account and API key, pictures marked not public, 1 to several
+  minutes each, so afterwards rather than live), or ASTAP on the laptop (free, needs its
+  star database for such narrow fields). Without tracking, short exposures (about 0.3 s)
+  and high gain, so stars don't trail. Also: align the finder with the camera before a
+  session, so a target centred in the finder is in the camera's field.
+- **Plate solving feedback on the puck** (asked at the first field test, 2026-11-25).
+  *Done 2026-11-25, tested:* the reticle pulses while the phone solves; a failed solve
+  (the app's `solveLog`) turns the rings amber with an X in the middle for 1.5 s, blinking
+  instead at night (`screen_solve_failed` in `main/screen.c`). Not to be done (decided
+  2026-11-27): the reason, the stars found, the time since the last good solve.
+
+- **Field tests** (asked 2026-11-24): a guided night under the sky, recorded in full, before
+  polishing more (docs/field-tests.md). *Built 2026-11-24, tried on the laptop with fake
+  data:* the collector, the agent's commands, the report (`tools/field/`); the app's record
+  and commands in development (`field-test.service.ts`, `field-log.ts`, a normal photo in
+  `camera.ts`), and the night's plan (`scripts/field-plan.mjs`); the puck's log over the
+  Wi-Fi in a field build (`main/field_log.c`, `CONFIG_PUCK_FIELD_LOG`) and its Wi-Fi signal
+  every 5 s. *To do:* install the ZWO packages, flash the field build, and try a session by
+  day (the link, the photos, the camera) before the first night.
+
+- **The QR codes red and dim, brightened by taps** (asked 2026-11-23, changed 2026-11-25:
+  a white QR code after a lost link dazzled at night). *Built 2026-11-25, tested:* every QR code comes up red at the screen's lowest brightness, day or night; each
+  tap on the screen brightens it a step: five in red, then five in white, then back to the
+  first (`QR_BRIGHTNESS` in `main/main.c`, `main/qr_view.c`); the status lines under it red
+  too while it is, and the puck stays red after linking until the app's state says
+  otherwise (`has_state`, built 2026-11-26, to flash and test). Brightnesses 10, 30, 90, 150 and 255 (3 was too dim, tested 2026-11-25). It shows only once the screen
+  has dimmed, so it never flashes. To tune on the board: the five brightnesses, and that the
+  phone's camera reads the dimmest red. The code is also bigger: a 2-square border, not the
+  standard's 4, and nothing light beyond it.
 - **Start-up screen.** *Done 2026-11-22, tested.* The colour test is gone; the app's logo
   floats in the middle over the landing page's twinkling stars and shooting star
-  (`main/splash.c`, the logo made by `tools/make_logo.py`), until the first QR code. The
+  (`main/splash.c`, the logo made by `tools/make_logo.py`), until the first QR code. All in
+  red on black since 2026-11-25, night mode or not, with the status lines red too: the logo
+  through a red filter (its brightness in red), made at start-up; and at brightness 30 of 255
+  (`SPLASH_BRIGHTNESS`), whatever the menu's setting. The
   saved brightness applies from the start. No white flash at start-up (2026-11-22,
   tested): the panel starts off at brightness 0 (Waveshare's commands switched it on at
   full brightness over whatever its memory held), and comes on after LVGL's first frame. Still there: the 2 s wait at start-up for a
@@ -236,12 +284,12 @@ Material Symbols icons, and what each item does.
   10th chunk held back (`SCTP_TEST_DROP_SENT_EVERY`): each was resent once and acknowledged.*
   Every DATA chunk the puck sends is kept until a SACK covers it, and resent after 300 ms,
   then twice as long each time, up to 2 s (`components/libpeer/README.md`).
-- **The QR code's slow heartbeat.** *Done 2026-11-21, tested; slowed to 6 s.* While the
-  QR code shows, the screen's brightness swells from dim (50 of 255) to full and back every
-  3 s, so a phone camera dazzled by the white AMOLED gets a darker moment to read it
-  (`beat_qr` in `main/main.c`). To tune on the board: the dim level and the period.
-- **Hide the QR code after a few minutes of waiting**, with a tap on the screen to show it
-  again (with fresh credentials and secret), so it isn't left on screen for anyone to scan.
+- **The QR code's slow heartbeat.** *Done 2026-11-21, removed 2026-11-25:* its swell to
+  full brightness dazzled at night; the taps' brightness steps replace it.
+- **The Wi-Fi signal log line in field builds only** (found 2026-11-27). `main/link.c` logs
+  the signal every 5 s in every build, though `docs/field-tests.md` says only the field
+  build adds it. Put it behind `CONFIG_PUCK_FIELD_LOG`, or keep it everywhere and fix the
+  doc. It went in with the failed-solve commit (5ad5344), as it's in the same file.
 - **Remove the lite pairing check logging** in `components/libpeer/src/agent.c` once pairing
   is known to be reliable.
 - **Reconnect without a new QR code.** *Built 2026-11-22, to test on the board.* The puck

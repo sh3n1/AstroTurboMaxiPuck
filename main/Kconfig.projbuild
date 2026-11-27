@@ -16,4 +16,12 @@ menu "AstroTurboMaxiPuck"
         help
             The Wi-Fi network's password. Leave empty for an open network.
 
+    config PUCK_FIELD_LOG
+        bool "Field test build: send the log over the Wi-Fi"
+        default n
+        help
+            Every log line also goes out as a UDP broadcast on port 4031, for the field
+            test collector (docs/field-tests.md). Anyone on the same network can read it:
+            only for tests, never in a release.
+
 endmenu

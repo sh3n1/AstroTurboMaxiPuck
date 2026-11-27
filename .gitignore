@@ -8,6 +8,11 @@ managed_components/
 # with a fallback Wi-Fi network in sdkconfig, it holds its password: never commit it.
 dist/
 
+# Field test sessions (docs/field-tests.md): photos, logs and the site's position
+field-sessions/
+tools/field/.venv/
+__pycache__/
+
 # Editor and OS files (.vscode holds this computer's ESP-IDF path)
 .vscode/
 .DS_Store

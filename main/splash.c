@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright The AstroTurboMaxiSolver authors
 //
-// The start-up screen: see splash.h. The stars' places, colours, sizes and timings are the
-// landing page's (src/landing/styles.css, ".sky"), in the puck's pixels.
+// The start-up screen: see splash.h. The stars' places, sizes and timings are the landing
+// page's (src/landing/styles.css, ".sky"), in the puck's pixels; its colours are red.
 
 #include "splash.h"
 
 #include <stdint.h>
 
+#include "esp_heap_caps.h"
+
 #define SCREEN_PX 466
-// The landing page's colours: its sky, text, muted text, accent and warning.
-#define COLOR_SKY 0x05070F
-#define COLOR_TEXT 0xE8EBF5
-#define COLOR_MUTED 0xA8B0C6
-#define COLOR_ACCENT 0x8FB7FF
-#define COLOR_WARNING 0xFFB454
+// Red on black, as night mode, whatever the mode: the puck may start in the dark. The
+// landing page's star colours (text, muted text, accent, warning) become red, the muted
+// ones dimmer.
+#define COLOR_SKY 0x000000
+#define COLOR_TEXT 0xFF0000
+#define COLOR_MUTED 0xB00000
+#define COLOR_ACCENT 0xFF0000
+#define COLOR_WARNING 0xFF0000
 // The stars twinkle between these opacities (its @keyframes twinkle: 0.25 to 0.8).
 #define TWINKLE_LOW (LV_OPA_COVER / 4)
 #define TWINKLE_HIGH (LV_OPA_COVER * 8 / 10)
@@ -59,6 +63,9 @@ typedef struct {
 static lv_obj_t *sky;
 static layer_t far_layer, near_layer;
 static lv_obj_t *shooting_star;
+// The logo through a red filter: its brightness in red only, made at start-up (red_logo).
+static lv_image_dsc_t logo_red;
+static uint8_t *logo_red_pixels;
 
 // The layer's stars, at this opacity: each its own, so no layer needs drawing apart.
 static void set_layer_opa(void *layer, int32_t opa)
@@ -143,6 +150,24 @@ static void make_shooting_star(void)
     lv_anim_start(&a);
 }
 
+// The logo's brightness in red alone, in a copy in PSRAM; the logo itself if no memory.
+static const lv_image_dsc_t *red_logo(void)
+{
+    const lv_image_dsc_t *src = &logo_image; // ARGB8888: blue, green, red, alpha per pixel
+    logo_red_pixels = heap_caps_malloc(src->data_size, MALLOC_CAP_SPIRAM);
+    if (!logo_red_pixels) return src;
+    for (uint32_t i = 0; i + 3 < src->data_size; i += 4) {
+        const uint8_t *p = src->data + i;
+        uint8_t *q = logo_red_pixels + i;
+        q[0] = q[1] = 0;
+        q[2] = (uint8_t)((p[2] * 77 + p[1] * 150 + p[0] * 29) >> 8); // the pixel's brightness
+        q[3] = p[3];
+    }
+    logo_red = *src;
+    logo_red.data = logo_red_pixels;
+    return &logo_red;
+}
+
 static void float_logo(void *obj, int32_t y)
 {
     lv_obj_set_style_translate_y(obj, y, 0);
@@ -163,7 +188,7 @@ void splash_create(lv_obj_t *screen)
     make_shooting_star();
 
     lv_obj_t *logo = lv_image_create(sky);
-    lv_image_set_src(logo, &logo_image);
+    lv_image_set_src(logo, red_logo());
     lv_obj_center(logo);
     lv_anim_t a;
     lv_anim_init(&a);
@@ -186,4 +211,11 @@ void splash_hide(void)
     lv_anim_delete(&near_layer, NULL);
     lv_obj_delete(sky);
     sky = NULL;
+    heap_caps_free(logo_red_pixels); // its image went with the sky
+    logo_red_pixels = NULL;
+}
+
+bool splash_shown(void)
+{
+    return sky != NULL;
 }

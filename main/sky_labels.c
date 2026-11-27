@@ -140,6 +140,12 @@ void sky_labels_begin(void)
     }
 }
 
+size_t sky_labels_kept_bytes(void)
+{
+    // The masks, and each text with its allocation's overhead, roughly.
+    return cache_bytes + cache_count * 32;
+}
+
 bool sky_labels_full(void)
 {
     return placed_count >= MAX_LABELS;

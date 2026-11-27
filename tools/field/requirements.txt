@@ -1,0 +1,7 @@
+# Only for a ZWO ASI telescope camera (tools/field/scope_camera.py); the collector itself
+# needs nothing beyond Python. Licences: zwoasi MIT, numpy BSD-3-Clause, Pillow MIT-CMU.
+# zwoasi also needs ZWO's own ASICamera2.dll (free, not open source), installed with
+# ASIStudio, N.I.N.A. or SharpCap; it stays on the laptop and is never in this repository.
+zwoasi==0.2.0
+numpy==2.5.5
+Pillow==13.0.0

@@ -56,11 +56,19 @@ void view_state_set_target(const char *name, const char *list)
 void view_state_set_app_state(const view_state_app_t *app)
 {
     taskENTER_CRITICAL(&lock);
+    state.has_state = true;
     state.night = app->night;
     state.solving = app->solving;
     state.sensors_on = app->sensors_on;
     state.view_mode = app->view_mode;
     state.eyepiece_field_deg = app->eyepiece_field_deg;
+    taskEXIT_CRITICAL(&lock);
+}
+
+void view_state_solve_failed(void)
+{
+    taskENTER_CRITICAL(&lock);
+    state.solve_failures++;
     taskEXIT_CRITICAL(&lock);
 }
 
@@ -71,7 +79,9 @@ void view_state_clear(void)
     state.target_name[0] = '\0';
     state.target_list[0] = '\0';
     state.solving = false;
-    // Night mode stays as it was: the screen mustn't flash bright when the link drops.
+    // Red again until the next link's state (main.c): the screen mustn't flash bright when
+    // the link drops.
+    state.has_state = false;
     taskEXIT_CRITICAL(&lock);
 }
 

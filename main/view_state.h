@@ -34,11 +34,13 @@ typedef struct {
     uint32_t view_count;                   // views taken since start, to tell a new one
     char target_name[VIEW_STATE_NAME_BYTES]; // UTF-8, empty when there is no target
     char target_list[VIEW_STATE_NAME_BYTES]; // the list observed through ("3/110  Messier"), or empty
+    bool has_state;                        // false until the app's state after linking
     bool night;                            // the app's night mode
     bool solving;                          // the app is plate solving
-    bool sensors_on;                       // the phone's motion sensors are on
+    bool sensors_on;                      // the phone's motion sensors are on
     view_mode_t view_mode;                 // the phone's view
     float eyepiece_field_deg;              // the eyepiece's true field; 0 until sent
+    uint32_t solve_failures;               // plate solves failed since start, to tell a new one
 } view_state_t;
 
 /** Takes a new view, unless it's older than the last (by its wrapping `seq`). */
@@ -50,6 +52,9 @@ void view_state_set_target(const char *name, const char *list);
 
 /** The app's state message. */
 void view_state_set_app_state(const view_state_app_t *app);
+
+/** A plate solve failed on the phone: the reticle says so for a moment. */
+void view_state_solve_failed(void);
 
 /** Forgets the view, target and state, as when the link is lost. */
 void view_state_clear(void);

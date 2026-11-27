@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "field_log.h"
 
 // About 20 minutes of the usual log (a few lines every 5 s), or less around a lost link.
 #define HISTORY_BYTES (128 * 1024)
@@ -53,6 +54,7 @@ static int keep_and_print(const char *format, va_list args)
         // A task logging while another holds the lock waits a moment; never forever.
         if (xSemaphoreTake(lock, pdMS_TO_TICKS(10)) == pdTRUE) {
             keep(line, n);
+            field_log_line(line, n); // over the Wi-Fi too, in a field build
             xSemaphoreGive(lock);
         }
     }
