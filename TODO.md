@@ -286,6 +286,10 @@ power bank). No battery level, charging or AXP2101 work.
   then twice as long each time, up to 2 s (`components/libpeer/README.md`).
 - **The QR code's slow heartbeat.** *Done 2026-11-21, removed 2026-11-25:* its swell to
   full brightness dazzled at night; the taps' brightness steps replace it.
+- **The Wi-Fi signal log line in field builds only** (found 2026-11-27). `main/link.c` logs
+  the signal every 5 s in every build, though `docs/field-tests.md` says only the field
+  build adds it. Put it behind `CONFIG_PUCK_FIELD_LOG`, or keep it everywhere and fix the
+  doc. It went in with the failed-solve commit (5ad5344), as it's in the same file.
 - **Remove the lite pairing check logging** in `components/libpeer/src/agent.c` once pairing
   is known to be reliable.
 - **Reconnect without a new QR code.** *Built 2026-11-22, to test on the board.* The puck
